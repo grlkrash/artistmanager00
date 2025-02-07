@@ -367,4 +367,53 @@ Best regards,
                     if payment.status == PaymentStatus.PAID
                 )
             }
-        } 
+        }
+
+    async def find_common_availability(
+        self,
+        collaborator_ids: List[str],
+        date: datetime
+    ) -> List[str]:
+        """Find common availability slots for multiple collaborators."""
+        day = date.strftime("%A").lower()
+        
+        # Collect all slots
+        slots = []
+        for collab_id in collaborator_ids:
+            collaborator = await self.get_collaborator(collab_id)
+            if collaborator and day in collaborator.availability:
+                collab_slots = collaborator.availability[day]
+                if collab_slots:  # Only consider the first slot for each collaborator
+                    start, end = collab_slots[0].split("-")
+                    slots.append({
+                        "start": self._time_to_minutes(start),
+                        "end": self._time_to_minutes(end)
+                    })
+        
+        # If any collaborator has no availability, return empty list
+        if len(slots) != len(collaborator_ids):
+            return []
+        
+        # Find the latest start time
+        latest_start = max(slot["start"] for slot in slots)
+        
+        # Find the earliest end time among slots that include the latest start time
+        earliest_end = min(
+            slot["end"] for slot in slots
+            if slot["start"] <= latest_start
+        )
+        
+        # Ensure the start time is before the end time
+        if latest_start >= earliest_end:
+            return []
+        
+        return [f"{self._minutes_to_time(latest_start)}-{self._minutes_to_time(earliest_end)}"]
+
+    def _time_to_minutes(self, time_str):
+        hours, minutes = map(int, time_str.split(':'))
+        return hours * 60 + minutes
+
+    def _minutes_to_time(self, minutes):
+        hours = minutes // 60
+        minutes = minutes % 60
+        return f"{hours:02d}:{minutes:02d}" 

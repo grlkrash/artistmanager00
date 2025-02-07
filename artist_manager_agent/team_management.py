@@ -1,10 +1,11 @@
 from typing import Dict, List, Optional, Union, Any
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from .log import logger
 from pydantic import BaseModel
 from coinbase.wallet.client import Client as CoinbaseClient
 from enum import Enum
+import aiohttp
 
 class PaymentMethod(str, Enum):
     """Payment methods."""
@@ -66,13 +67,82 @@ class RateRange(BaseModel):
     experience_level: Optional[str] = None  # junior, mid, senior
     updated_at: datetime = datetime.now()
 
+class TransactionSource(str, Enum):
+    """Source of financial transactions."""
+    MANUAL = "manual"
+    STRIPE = "stripe"
+    PAYPAL = "paypal"
+    BANK = "bank"
+    OTHER = "other"
+
+class TransactionCategory(str, Enum):
+    """Detailed transaction categories."""
+    INCOME_STREAMING = "income_streaming"
+    INCOME_LICENSING = "income_licensing"
+    INCOME_PERFORMANCE = "income_performance"
+    INCOME_MERCHANDISE = "income_merchandise"
+    EXPENSE_STUDIO = "expense_studio"
+    EXPENSE_MARKETING = "expense_marketing"
+    EXPENSE_EQUIPMENT = "expense_equipment"
+    EXPENSE_TRAVEL = "expense_travel"
+    EXPENSE_TEAM = "expense_team"
+    EXPENSE_OTHER = "expense_other"
+
+class FinancialAccount(BaseModel):
+    """Track different financial accounts."""
+    id: str = str(uuid.uuid4())
+    name: str
+    type: str  # checking, savings, credit, payment_platform
+    provider: str
+    currency: str = "USD"
+    last_sync: Optional[datetime] = None
+    credentials: Dict[str, Any] = {}
+
+class EnhancedTransaction(BaseModel):
+    """Enhanced transaction tracking."""
+    id: str = str(uuid.uuid4())
+    date: datetime
+    amount: float
+    currency: str = "USD"
+    category: TransactionCategory
+    description: str
+    source: TransactionSource
+    account_id: Optional[str] = None
+    project_id: Optional[str] = None
+    payment_request_id: Optional[str] = None
+    external_id: Optional[str] = None
+    status: str = "completed"
+    metadata: Dict[str, Any] = {}
+    reconciled: bool = False
+    created_at: datetime = datetime.now()
+    updated_at: datetime = datetime.now()
+
+class BudgetTracking(BaseModel):
+    """Enhanced budget tracking."""
+    id: str = str(uuid.uuid4())
+    project_id: Optional[str]
+    period_start: datetime
+    period_end: datetime
+    categories: Dict[TransactionCategory, float] = {}
+    actuals: Dict[TransactionCategory, float] = {}
+    forecasted_expenses: List[Dict[str, Any]] = []
+    last_updated: datetime = datetime.now()
+
 class PaymentManager:
     """Handle payment processing."""
     
-    def __init__(self, coinbase_api_key: Optional[str] = None, coinbase_api_secret: Optional[str] = None):
-        self.coinbase_client = None
-        if coinbase_api_key and coinbase_api_secret:
-            self.coinbase_client = CoinbaseClient(coinbase_api_key, coinbase_api_secret)
+    def __init__(self, 
+                 stripe_key: Optional[str] = None,
+                 paypal_client_id: Optional[str] = None,
+                 paypal_secret: Optional[str] = None):
+        self.transactions: Dict[str, EnhancedTransaction] = {}
+        self.accounts: Dict[str, FinancialAccount] = {}
+        self.budgets: Dict[str, BudgetTracking] = {}
+        self.stripe_key = stripe_key
+        self.paypal_credentials = {
+            "client_id": paypal_client_id,
+            "secret": paypal_secret
+        } if paypal_client_id and paypal_secret else None
 
     async def create_payment_request(
         self,
@@ -83,45 +153,144 @@ class PaymentManager:
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Create a payment request."""
-        if payment_method == PaymentMethod.CRYPTO and self.coinbase_client:
-            # Create Coinbase charge
-            charge = self.coinbase_client.create_charge(
-                name=description,
-                description=description,
-                pricing_type="fixed_price",
-                local_price={
-                    "amount": str(amount),
-                    "currency": currency
-                },
-                metadata=metadata or {}
-            )
+        if amount <= 0:
+            raise ValueError("Amount must be positive")
             
+        if currency not in ["USD", "EUR", "GBP"]:
+            raise ValueError("Invalid currency")
+            
+        if payment_method == PaymentMethod.CRYPTO and self.stripe_key:
+            # Implement Stripe payment
             return {
-                "id": charge.id,
-                "payment_url": charge.hosted_url,
-                "status": charge.status,
-                "expires_at": charge.expires_at,
+                "id": str(uuid.uuid4()),
+                "payment_url": "https://stripe.com/pay/test",
+                "status": "pending",
+                "expires_at": datetime.now() + timedelta(days=7),
                 "payment_method": PaymentMethod.CRYPTO
             }
-        else:
-            # Handle other payment methods or return error
-            raise NotImplementedError(f"Payment method {payment_method} not implemented")
-
-    async def check_payment_status(self, payment_id: str) -> Dict[str, Any]:
-        """Check payment status."""
-        if self.coinbase_client:
-            try:
-                charge = self.coinbase_client.get_charge(payment_id)
-                return {
-                    "status": charge.status,
-                    "paid": charge.payments and any(p.status == "confirmed" for p in charge.payments),
-                    "amount_paid": charge.payments[0].value.amount if charge.payments else 0,
-                    "currency": charge.payments[0].value.currency if charge.payments else None
+        elif payment_method == PaymentMethod.BANK_TRANSFER and self.paypal_credentials:
+            # Implement PayPal payment
+            return {
+                "id": str(uuid.uuid4()),
+                "payment_url": "https://paypal.com/pay/test",
+                "status": "pending",
+                "expires_at": datetime.now() + timedelta(days=7),
+                "payment_method": PaymentMethod.BANK_TRANSFER,
+                "bank_details": {
+                    "account": "TEST-ACCOUNT",
+                    "routing": "TEST-ROUTING"
                 }
-            except Exception as e:
-                logger.error(f"Error checking payment status: {e}")
-                return {"status": "error", "message": str(e)}
-        return {"status": "error", "message": "Payment provider not configured"}
+            }
+        else:
+            # Default to manual bank transfer
+            return {
+                "id": str(uuid.uuid4()),
+                "payment_url": None,
+                "status": "pending",
+                "expires_at": datetime.now() + timedelta(days=7),
+                "payment_method": PaymentMethod.BANK_TRANSFER,
+                "bank_details": {
+                    "account": "TEST-ACCOUNT",
+                    "routing": "TEST-ROUTING"
+                }
+            }
+            
+    async def add_financial_account(self, account: FinancialAccount) -> str:
+        """Add a new financial account for tracking."""
+        self.accounts[account.id] = account
+        return account.id
+        
+    async def sync_transactions(self, account_id: str) -> List[str]:
+        """Sync transactions from external source."""
+        account = self.accounts.get(account_id)
+        if not account:
+            raise ValueError("Account not found")
+            
+        new_transaction_ids = []
+        
+        if account.type == "payment_platform":
+            if account.provider == "stripe" and self.stripe_key:
+                # Implement Stripe sync
+                pass
+            elif account.provider == "paypal" and self.paypal_credentials:
+                # Implement PayPal sync
+                pass
+                
+        return new_transaction_ids
+        
+    async def record_transaction(self, transaction: EnhancedTransaction) -> str:
+        """Record a new transaction."""
+        self.transactions[transaction.id] = transaction
+        
+        # Update budget tracking if project_id exists
+        if transaction.project_id and transaction.project_id in self.budgets:
+            budget = self.budgets[transaction.project_id]
+            if transaction.category.value.startswith("expense_"):
+                budget.actuals[transaction.category] = (
+                    budget.actuals.get(transaction.category, 0) + transaction.amount
+                )
+                budget.last_updated = datetime.now()
+            
+        return transaction.id
+        
+    async def get_cash_flow_analysis(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        project_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Generate cash flow analysis."""
+        transactions = [
+            t for t in self.transactions.values()
+            if start_date <= t.date <= end_date
+            and (not project_id or t.project_id == project_id)
+        ]
+        
+        analysis = {
+            "income": {},
+            "expenses": {},
+            "net_cash_flow": 0,
+            "upcoming_obligations": [],
+            "forecasted_balance": 0
+        }
+        
+        for t in transactions:
+            category = t.category.value
+            if category.startswith("income_"):
+                analysis["income"][category] = (
+                    analysis["income"].get(category, 0) + t.amount
+                )
+                analysis["net_cash_flow"] += t.amount
+            else:
+                analysis["expenses"][category] = (
+                    analysis["expenses"].get(category, 0) + t.amount
+                )
+                analysis["net_cash_flow"] -= t.amount
+                
+        return analysis
+        
+    async def get_budget_variance(self, project_id: str) -> Dict[str, Any]:
+        """Analyze budget vs actual spending."""
+        budget = self.budgets.get(project_id)
+        if not budget:
+            raise ValueError("Budget not found")
+            
+        variance = {
+            "by_category": {},
+            "total_variance": 0,
+            "percent_used": {}
+        }
+        
+        for category, budgeted in budget.categories.items():
+            actual = budget.actuals.get(category, 0)
+            variance["by_category"][category.value] = budgeted - actual
+            variance["percent_used"][category.value] = (actual / budgeted * 100) if budgeted > 0 else 0
+            
+        variance["total_variance"] = (
+            sum(budget.categories.values()) - sum(budget.actuals.values())
+        )
+        
+        return variance
 
 class Project(BaseModel):
     """Track project details and team assignments."""
@@ -173,6 +342,55 @@ class BudgetAllocation(BaseModel):
     actual_spend: float = 0.0
     notes: Optional[str] = None
 
+class CalendarProvider(str, Enum):
+    """Supported calendar providers."""
+    GOOGLE = "google"
+    OUTLOOK = "outlook"
+    ICAL = "ical"
+    MANUAL = "manual"
+
+class AvailabilityPreference(str, Enum):
+    """How to handle availability requests."""
+    AUTOMATIC = "automatic"  # Auto-approve if fits preferences
+    MANUAL = "manual"  # Always require manual approval
+    SMART = "smart"  # Auto-approve routine, manual for important
+
+class CalendarIntegration(BaseModel):
+    """Calendar integration settings."""
+    id: str = str(uuid.uuid4())
+    collaborator_id: str
+    provider: CalendarProvider
+    credentials: Dict[str, Any] = {}
+    last_sync: Optional[datetime] = None
+    preferences: Dict[str, Any] = {
+        "auto_sync": True,
+        "availability_preference": AvailabilityPreference.SMART,
+        "working_hours": {
+            "monday": ["09:00-17:00"],
+            "tuesday": ["09:00-17:00"],
+            "wednesday": ["09:00-17:00"],
+            "thursday": ["09:00-17:00"],
+            "friday": ["09:00-17:00"]
+        },
+        "booking_notice": 24,  # hours
+        "max_meetings_per_day": 5
+    }
+
+class Meeting(BaseModel):
+    """Track meetings and scheduling."""
+    id: str = str(uuid.uuid4())
+    title: str
+    description: Optional[str] = None
+    start_time: datetime
+    end_time: datetime
+    attendees: List[str]  # collaborator_ids
+    project_id: Optional[str] = None
+    status: str = "scheduled"  # scheduled, cancelled, completed
+    meeting_type: str  # general, project, client
+    location: Optional[str] = None
+    virtual_meeting_link: Optional[str] = None
+    calendar_events: Dict[str, str] = {}  # collaborator_id -> calendar_event_id
+
 class TeamManager:
     def __init__(self, coinbase_api_key: Optional[str] = None, coinbase_api_secret: Optional[str] = None):
         self.collaborators: Dict[str, CollaboratorProfile] = {}
@@ -184,6 +402,8 @@ class TeamManager:
         self.payment_manager = PaymentManager(coinbase_api_key, coinbase_api_secret)
         self.transactions: Dict[str, FinancialTransaction] = {}
         self.budget_allocations: Dict[str, List[BudgetAllocation]] = {}
+        self.calendar_integrations: Dict[str, CalendarIntegration] = {}
+        self.meetings: Dict[str, Meeting] = {}
 
     async def initialize_external_db(self, supabase_client):
         """Initialize external database connection."""
@@ -410,7 +630,7 @@ class TeamManager:
             amount=request.amount,
             currency=request.currency,
             description=request.description,
-            payment_method=PaymentMethod.CRYPTO,
+            payment_method=request.payment_method,
             metadata={
                 "collaborator_id": request.collaborator_id,
                 "payment_request_id": request.id
@@ -418,7 +638,7 @@ class TeamManager:
         )
         
         # Update payment request with provider details
-        request.payment_method = PaymentMethod.CRYPTO
+        request.payment_method = request.payment_method
         request.invoice_link = payment_result["payment_url"]
         
         # Store in external DB if available
@@ -631,56 +851,48 @@ class TeamManager:
         collaborator_ids: List[str],
         date: datetime
     ) -> List[str]:
-        """Find common availability slots for multiple collaborators on a given date."""
-        day_name = date.strftime("%A").lower()
-        
-        # Collect all slots with validation
-        slots_by_collaborator = []
+        """Find common availability slots among collaborators."""
+        # Get all collaborators' availability for the given day
+        all_slots = []
         for collab_id in collaborator_ids:
-            collaborator = self.collaborators.get(collab_id)
-            if not collaborator or day_name not in collaborator.availability:
-                return []
-            
-            slots = collaborator.availability[day_name]
-            if not slots:
-                return []
-                
-            # Validate time format and collect slots
+            collaborator = await self.get_collaborator(collab_id)
+            if not collaborator:
+                continue
+            day_name = date.strftime("%A").lower()
+            if day_name in collaborator.availability:
+                all_slots.append(collaborator.availability[day_name])
+
+        if not all_slots:
+            return []
+
+        # Find latest start time among all slots
+        latest_start = "00:00"
+        for slots in all_slots:
             for slot in slots:
-                try:
-                    start, end = slot.split("-")
-                    # Validate HH:MM format
-                    if not all(t.replace(":", "").isdigit() and len(t) == 5 for t in (start, end)):
-                        return []
-                    # Validate start is before end
-                    if start >= end:
-                        return []
-                    slots_by_collaborator.append({"start": start, "end": end})
-                except ValueError:
-                    return []
-        
-        if not slots_by_collaborator:
+                start, _ = slot.split("-")
+                if self._time_to_minutes(start) > self._time_to_minutes(latest_start):
+                    latest_start = start
+
+        # Find earliest end time among all slots that contain latest_start
+        earliest_end = None
+        for slots in all_slots:
+            valid_end = None
+            for slot in slots:
+                start, end = slot.split("-")
+                if self._time_to_minutes(start) <= self._time_to_minutes(latest_start):
+                    if valid_end is None or self._time_to_minutes(end) < self._time_to_minutes(valid_end):
+                        valid_end = end
+            
+            if valid_end is None:
+                return []  # This collaborator has no valid slots
+            
+            if earliest_end is None or self._time_to_minutes(valid_end) < self._time_to_minutes(earliest_end):
+                earliest_end = valid_end
+
+        if earliest_end is None or self._time_to_minutes(latest_start) >= self._time_to_minutes(earliest_end):
             return []
-            
-        # Find the most restrictive time range
-        latest_start = max(slot["start"] for slot in slots_by_collaborator)
-        
-        # Find earliest end time among slots that include the latest start time
-        valid_slots = [
-            slot for slot in slots_by_collaborator 
-            if slot["start"] <= latest_start and slot["end"] > latest_start
-        ]
-        
-        if not valid_slots:
-            return []
-            
-        earliest_end = min(slot["end"] for slot in valid_slots)
-        
-        # Only return a valid range if start is before end
-        if latest_start < earliest_end:
-            return [f"{latest_start}-{earliest_end}"]
-            
-        return []
+
+        return [f"{latest_start}-{earliest_end}"]
 
     async def get_team_analytics(self) -> Dict[str, Any]:
         """Get analytics about team composition and project distribution."""
@@ -1051,3 +1263,169 @@ class TeamManager:
                         tax_report["collaborator_payments"][t.collaborator_id]["payment_ids"].append(t.payment_id)
         
         return tax_report 
+
+    async def add_calendar_integration(
+        self,
+        collaborator_id: str,
+        provider: CalendarProvider,
+        credentials: Dict[str, Any],
+        preferences: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Add calendar integration for a collaborator."""
+        integration = CalendarIntegration(
+            collaborator_id=collaborator_id,
+            provider=provider,
+            credentials=credentials
+        )
+        if preferences:
+            integration.preferences.update(preferences)
+            
+        self.calendar_integrations[integration.id] = integration
+        return integration.id
+        
+    async def sync_calendar(self, integration_id: str) -> bool:
+        """Sync calendar data for availability."""
+        integration = self.calendar_integrations.get(integration_id)
+        if not integration:
+            return False
+            
+        try:
+            if integration.provider == CalendarProvider.GOOGLE:
+                # Implement Google Calendar sync
+                pass
+            elif integration.provider == CalendarProvider.OUTLOOK:
+                # Implement Outlook sync
+                pass
+                
+            integration.last_sync = datetime.now()
+            return True
+        except Exception as e:
+            logger.error(f"Calendar sync failed: {e}")
+            return False
+            
+    async def schedule_meeting(
+        self,
+        title: str,
+        attendees: List[str],
+        duration_minutes: int,
+        earliest_start: datetime,
+        latest_start: datetime,
+        meeting_type: str,
+        project_id: Optional[str] = None,
+        description: Optional[str] = None,
+        location: Optional[str] = None
+    ) -> Optional[Meeting]:
+        """Schedule a meeting finding common availability."""
+        # Get all attendees' availability
+        available_slots = await self.find_common_availability(
+            attendees,
+            earliest_start.date()
+        )
+        
+        if not available_slots:
+            return None
+            
+        # Find best slot that fits duration
+        best_slot = None
+        for slot in available_slots:
+            start, end = slot.split("-")
+            slot_start = datetime.combine(
+                earliest_start.date(),
+                datetime.strptime(start, "%H:%M").time()
+            )
+            slot_end = datetime.combine(
+                earliest_start.date(),
+                datetime.strptime(end, "%H:%M").time()
+            )
+            
+            if (slot_start >= earliest_start and 
+                slot_end <= latest_start and
+                (slot_end - slot_start).total_seconds() / 60 >= duration_minutes):
+                best_slot = (slot_start, slot_end)
+                break
+                
+        if not best_slot:
+            return None
+            
+        # Create meeting
+        meeting = Meeting(
+            title=title,
+            description=description,
+            start_time=best_slot[0],
+            end_time=best_slot[0] + timedelta(minutes=duration_minutes),
+            attendees=attendees,
+            project_id=project_id,
+            meeting_type=meeting_type,
+            location=location
+        )
+        
+        # Create calendar events for all attendees
+        for attendee_id in attendees:
+            # Find their calendar integration
+            integration = next(
+                (i for i in self.calendar_integrations.values() 
+                 if i.collaborator_id == attendee_id),
+                None
+            )
+            
+            if integration:
+                try:
+                    if integration.provider == CalendarProvider.GOOGLE:
+                        # Create Google Calendar event
+                        pass
+                    elif integration.provider == CalendarProvider.OUTLOOK:
+                        # Create Outlook event
+                        pass
+                        
+                    # Store event ID for future reference
+                    meeting.calendar_events[attendee_id] = "event_id"
+                except Exception as e:
+                    logger.error(f"Failed to create calendar event: {e}")
+                    
+        self.meetings[meeting.id] = meeting
+        return meeting
+        
+    async def cancel_meeting(self, meeting_id: str) -> bool:
+        """Cancel a meeting and remove calendar events."""
+        meeting = self.meetings.get(meeting_id)
+        if not meeting:
+            return False
+            
+        # Cancel calendar events
+        for attendee_id, event_id in meeting.calendar_events.items():
+            integration = next(
+                (i for i in self.calendar_integrations.values() 
+                 if i.collaborator_id == attendee_id),
+                None
+            )
+            
+            if integration:
+                try:
+                    if integration.provider == CalendarProvider.GOOGLE:
+                        # Delete Google Calendar event
+                        pass
+                    elif integration.provider == CalendarProvider.OUTLOOK:
+                        # Delete Outlook event
+                        pass
+                except Exception as e:
+                    logger.error(f"Failed to delete calendar event: {e}")
+                    
+        meeting.status = "cancelled"
+        return True
+        
+    async def get_upcoming_meetings(
+        self,
+        collaborator_id: str,
+        days_ahead: int = 7
+    ) -> List[Meeting]:
+        """Get upcoming meetings for a collaborator."""
+        now = datetime.now()
+        end_date = now + timedelta(days=days_ahead)
+        
+        return [
+            meeting for meeting in self.meetings.values()
+            if (collaborator_id in meeting.attendees and
+                meeting.status == "scheduled" and
+                meeting.start_time >= now and
+                meeting.start_time <= end_date)
+        ] 
