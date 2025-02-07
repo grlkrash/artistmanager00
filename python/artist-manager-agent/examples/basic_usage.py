@@ -1,13 +1,16 @@
 import asyncio
 import os
 from datetime import datetime, timedelta
-from artist_manager_agent.agent import ArtistManagerAgent, ArtistProfile, TeamMember, Task
+from artist_manager_agent.agent import ArtistManagerAgent, ArtistProfile, Contract, Task, Event, FinancialRecord
 
 async def main():
     # Initialize artist profile
     artist = ArtistProfile(
+        artist_id="alex_rivera_1",
         name="Alex Rivera",
-        genre="Alternative R&B",
+        email="alex@rivera.com",
+        phone="+1234567890",
+        genre=["Alternative R&B"],
         career_stage="emerging",
         goals=[
             "Release a full-length album in 6 months",
@@ -29,7 +32,20 @@ async def main():
             "Released 2 successful EPs",
             "Featured on major playlist",
             "Opened for established act"
-        ]
+        ],
+        social_media={
+            "instagram": "@alexrivera",
+            "twitter": "@alexriveramusic",
+            "tiktok": "@alexrivera"
+        },
+        streaming_profiles={
+            "spotify": "spotify:artist:alexrivera",
+            "apple_music": "artist/alexrivera"
+        },
+        health_notes=[],
+        brand_guidelines="Modern, authentic R&B artist with a focus on emotional storytelling and innovative sound design",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
 
     # Initialize the agent
@@ -38,25 +54,63 @@ async def main():
         openai_api_key=os.getenv("OPENAI_API_KEY", "")
     )
 
-    # Add team members
-    producer = TeamMember(
-        name="Sarah Chen",
-        role="Producer",
-        skills=["Music Production", "Mixing", "Arrangement"],
-        performance_metrics={"track_completion_rate": 0.9}
+    # Create a new contract
+    collaboration_contract = Contract(
+        contract_id="contract_1",
+        title="Producer Collaboration Agreement",
+        parties=["Alex Rivera", "Sarah Chen"],
+        terms="Full production rights for upcoming album",
+        start_date=datetime.now(),
+        end_date=datetime.now() + timedelta(days=180),
+        value=50000.0,
+        status="active",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
-    agent.add_team_member(producer)
+    agent.add_contract(collaboration_contract)
 
-    # Create and assign tasks
+    # Create a new task
     album_task = Task(
+        task_id="task_1",
         title="Complete album production",
         description="Finish producing all tracks for the upcoming album",
-        deadline=datetime.now() + timedelta(days=90),
         assigned_to="Sarah Chen",
+        due_date=datetime.now() + timedelta(days=90),
+        priority="high",
         status="in_progress",
-        priority=1
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
-    agent.assign_task(album_task)
+    agent.add_task(album_task)
+
+    # Create a new event
+    studio_session = Event(
+        event_id="event_1",
+        title="Album Recording Session",
+        description="Full day studio session for album tracks",
+        start_time=datetime.now() + timedelta(days=7),
+        end_time=datetime.now() + timedelta(days=7, hours=8),
+        location="Sunset Sound Studios",
+        attendees=["Alex Rivera", "Sarah Chen"],
+        status="scheduled",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+    agent.add_event(studio_session)
+
+    # Record a financial transaction
+    payment = FinancialRecord(
+        record_id="finance_1",
+        type="income",
+        amount=5000.0,
+        description="Advance payment for studio time",
+        date=datetime.now(),
+        category="studio_expenses",
+        status="completed",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+    agent.add_financial_record(payment)
 
     # Get guidance on a situation
     situation = """
@@ -83,9 +137,10 @@ async def main():
     print(evaluation)
 
     # Check task status
-    task_status = agent.get_task_status()
-    print("\nCurrent Task Status:")
-    print(task_status)
+    tasks = agent.get_tasks()
+    print("\nCurrent Tasks:")
+    for task in tasks:
+        print(f"- {task.title}: {task.status}")
 
 if __name__ == "__main__":
     asyncio.run(main()) 

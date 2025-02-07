@@ -16,24 +16,30 @@ from artist_manager_agent.music_services import (
 @pytest.fixture
 def mock_track():
     return Track(
+        track_id="test_track_1",
         title="Test Track",
-        artist="Test Artist",
+        artist_id="test_artist_1",
+        duration=180,
+        file_path="/test/track.wav",
         genre="Pop",
-        release_date=datetime.now(),
-        file_path=Path("/test/track.wav"),
-        artwork_path=Path("/test/artwork.jpg")
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
 
 @pytest.fixture
 def mock_release():
+    track = mock_track()
     return Release(
+        release_id="test_release_1",
         title="Test Album",
-        artist="Test Artist",
-        type=ReleaseType.ALBUM,
+        artist_id="test_artist_1",
+        release_type=ReleaseType.ALBUM,
+        tracks=[track],
         genre="Pop",
         release_date=datetime.now(),
-        tracks=[mock_track()],
-        artwork_path=Path("/test/artwork.jpg")
+        artwork_path="/test/artwork.jpg",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
 
 @pytest.fixture
@@ -48,12 +54,12 @@ async def test_create_release(music_services, mock_release):
     """Test creating a new release."""
     with patch.object(music_services.session, "post") as mock_post:
         mock_post.return_value.__aenter__.return_value.json.return_value = {
-            "id": "test_release_id",
+            "release_id": "test_release_id",
             "status": "created"
         }
         
         result = await music_services.create_release(mock_release)
-        assert result["id"] == "test_release_id"
+        assert result["release_id"] == "test_release_id"
         assert result["status"] == "created"
 
 @pytest.mark.asyncio
@@ -84,7 +90,7 @@ async def test_get_platform_stats(music_services):
         
         result = await music_services.get_platform_stats(
             platform=DistributionPlatform.SPOTIFY,
-            release_id="test_release"
+            release_id="test_release_1"
         )
         assert result["streams"] == 1000
         assert result["listeners"] == 500

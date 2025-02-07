@@ -33,12 +33,28 @@ def mock_context():
 @pytest.fixture
 def artist_profile():
     return ArtistProfile(
+        artist_id="test_artist_1",
         name="Test Artist",
-        genre="Pop",
+        email="test@artist.com",
+        phone="+1234567890",
+        genre=["Pop"],
         career_stage="emerging",
         goals=["Release album"],
         strengths=["Vocals"],
-        areas_for_improvement=["Marketing"]
+        areas_for_improvement=["Marketing"],
+        achievements=[],
+        social_media={
+            "instagram": "@test_artist",
+            "twitter": "@test_artist"
+        },
+        streaming_profiles={
+            "spotify": "spotify:artist:test",
+            "apple_music": "artist/test"
+        },
+        health_notes=[],
+        brand_guidelines="Test artist brand guidelines",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
 
 @pytest.fixture
