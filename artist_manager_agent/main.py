@@ -63,32 +63,27 @@ class ArtistManagerBot:
             currency = args[1].upper()
             description = " ".join(args[2:])
             
-            payment_method = context.user_data.get("payment_method", PaymentMethod.BANK_TRANSFER)
+            payment_method = context.user_data.get("payment_method")
+            if not payment_method:
+                await update.message.reply_text(
+                    "Please set up your payment method first using /setup_payment"
+                )
+                return
             
-            request = PaymentRequest(
-                collaborator_id=str(update.effective_user.id),
+            response = await self.team_manager.payment_manager.create_payment_request(
                 amount=amount,
                 currency=currency,
                 description=description,
-                due_date=datetime.now(),  # You may want to make this configurable
                 payment_method=payment_method
             )
             
-            result = await self.team_manager.create_payment_request(request)
-            
-            if result.get("payment_url"):
-                await update.message.reply_text(
-                    f"Payment request created!\nAmount: {amount} {currency}\n"
-                    f"Description: {description}\nPayment URL: {result['payment_url']}"
-                )
-            else:
-                await update.message.reply_text(
-                    f"Payment request created!\nAmount: {amount} {currency}\n"
-                    f"Description: {description}\nStatus: {result['status']}"
-                )
+            await update.message.reply_text(
+                f"Payment request created!\nAmount: {int(amount) if amount.is_integer() else amount} {currency}\n"
+                f"Description: {description}\nStatus: {response['status']}"
+            )
                 
-        except ValueError:
-            await update.message.reply_text("Invalid amount format. Please use numbers only.")
+        except ValueError as e:
+            await update.message.reply_text(f"Error creating payment request: {str(e)}")
         except Exception as e:
             await update.message.reply_text(f"Error creating payment request: {str(e)}")
 

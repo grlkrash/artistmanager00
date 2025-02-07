@@ -138,11 +138,21 @@ class PaymentManager:
         self.transactions: Dict[str, EnhancedTransaction] = {}
         self.accounts: Dict[str, FinancialAccount] = {}
         self.budgets: Dict[str, BudgetTracking] = {}
+        self.payments: Dict[str, PaymentRequest] = {}
         self.stripe_key = stripe_key
         self.paypal_credentials = {
             "client_id": paypal_client_id,
             "secret": paypal_secret
         } if paypal_client_id and paypal_secret else None
+        self.receipt_template = """
+        Receipt #{receipt_id}
+        Date: {date}
+        Amount: {amount} {currency}
+        Description: {description}
+        Status: {status}
+        Payment Method: {payment_method}
+        Transaction ID: {transaction_id}
+        """
 
     async def create_payment_request(
         self,
@@ -159,10 +169,21 @@ class PaymentManager:
         if currency not in ["USD", "EUR", "GBP"]:
             raise ValueError("Invalid currency")
             
+        payment_id = str(uuid.uuid4())
+        payment_request = PaymentRequest(
+            id=payment_id,
+            amount=amount,
+            currency=currency,
+            description=description,
+            payment_method=payment_method,
+            status=PaymentStatus.PENDING
+        )
+        self.payments[payment_id] = payment_request
+            
         if payment_method == PaymentMethod.CRYPTO and self.stripe_key:
             # Implement Stripe payment
             return {
-                "id": str(uuid.uuid4()),
+                "id": payment_id,
                 "payment_url": "https://stripe.com/pay/test",
                 "status": "pending",
                 "expires_at": datetime.now() + timedelta(days=7),
@@ -171,7 +192,7 @@ class PaymentManager:
         elif payment_method == PaymentMethod.BANK_TRANSFER and self.paypal_credentials:
             # Implement PayPal payment
             return {
-                "id": str(uuid.uuid4()),
+                "id": payment_id,
                 "payment_url": "https://paypal.com/pay/test",
                 "status": "pending",
                 "expires_at": datetime.now() + timedelta(days=7),
@@ -184,7 +205,7 @@ class PaymentManager:
         else:
             # Default to manual bank transfer
             return {
-                "id": str(uuid.uuid4()),
+                "id": payment_id,
                 "payment_url": None,
                 "status": "pending",
                 "expires_at": datetime.now() + timedelta(days=7),
@@ -291,6 +312,161 @@ class PaymentManager:
         )
         
         return variance
+
+    async def generate_receipt(self, payment_id: str) -> Optional[str]:
+        """Generate a receipt for a completed payment."""
+        payment = self.payments.get(payment_id)
+        if not payment or payment.status != PaymentStatus.PAID:
+            return None
+
+        receipt_data = {
+            "receipt_id": f"R{payment_id[:8]}",
+            "date": payment.paid_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "amount": payment.amount,
+            "currency": payment.currency,
+            "description": payment.description,
+            "status": payment.status.value,
+            "payment_method": payment.payment_method.value,
+            "transaction_id": payment_id
+        }
+        
+        return self.receipt_template.format(**receipt_data)
+
+    async def send_payment_reminder(self, payment_id: str) -> bool:
+        """Send a reminder for pending payments."""
+        payment = self.payments.get(payment_id)
+        if not payment or payment.status != PaymentStatus.PENDING:
+            return False
+
+        # Here you would implement the actual reminder sending logic
+        # For now, we'll just log it
+        logger.info(f"Payment reminder sent for payment {payment_id}")
+        return True
+
+    async def process_batch_payments(self, payment_ids: List[str]) -> Dict[str, Any]:
+        """Process multiple payments in batch."""
+        results = {
+            "successful": [],
+            "failed": [],
+            "skipped": []
+        }
+
+        for payment_id in payment_ids:
+            payment = self.payments.get(payment_id)
+            if not payment:
+                results["skipped"].append(payment_id)
+                continue
+
+            try:
+                await self.process_payment(payment_id)
+                results["successful"].append(payment_id)
+            except Exception as e:
+                results["failed"].append({
+                    "payment_id": payment_id,
+                    "error": str(e)
+                })
+
+        return results
+
+    async def get_payment_analytics(
+        self,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """Generate payment analytics."""
+        if not start_date:
+            start_date = datetime.now() - timedelta(days=30)
+        if not end_date:
+            end_date = datetime.now()
+
+        analytics = {
+            "total_volume": 0.0,
+            "successful_payments": 0,
+            "failed_payments": 0,
+            "pending_payments": 0,
+            "average_amount": 0.0,
+            "by_payment_method": {},
+            "by_currency": {},
+            "daily_volume": {},
+            "processing_time": []
+        }
+
+        relevant_payments = [
+            p for p in self.payments.values()
+            if start_date <= p.created_at <= end_date
+        ]
+
+        if not relevant_payments:
+            return analytics
+
+        for payment in relevant_payments:
+            analytics["total_volume"] += payment.amount
+
+            if payment.status == PaymentStatus.PAID:
+                analytics["successful_payments"] += 1
+                if payment.paid_at:
+                    processing_time = (payment.paid_at - payment.created_at).total_seconds()
+                    analytics["processing_time"].append(processing_time)
+            elif payment.status == PaymentStatus.FAILED:
+                analytics["failed_payments"] += 1
+            elif payment.status == PaymentStatus.PENDING:
+                analytics["pending_payments"] += 1
+
+            # Track by payment method
+            method = payment.payment_method.value if payment.payment_method else "unknown"
+            analytics["by_payment_method"][method] = analytics["by_payment_method"].get(method, 0) + 1
+
+            # Track by currency
+            analytics["by_currency"][payment.currency] = analytics["by_currency"].get(payment.currency, 0) + payment.amount
+
+            # Track daily volume
+            day = payment.created_at.date().isoformat()
+            analytics["daily_volume"][day] = analytics["daily_volume"].get(day, 0) + payment.amount
+
+        # Calculate averages
+        analytics["average_amount"] = analytics["total_volume"] / len(relevant_payments)
+        if analytics["processing_time"]:
+            analytics["average_processing_time"] = sum(analytics["processing_time"]) / len(analytics["processing_time"])
+
+        return analytics
+
+    async def process_payment(self, payment_id: str) -> Dict[str, Any]:
+        """Process a single payment."""
+        payment = self.payments.get(payment_id)
+        if not payment:
+            raise ValueError("Payment not found")
+            
+        if payment.status != PaymentStatus.PENDING:
+            raise ValueError("Payment is not in pending status")
+            
+        try:
+            # Here you would implement the actual payment processing logic
+            # For now, we'll just simulate successful processing
+            payment.status = PaymentStatus.PAID
+            payment.paid_at = datetime.now()
+            
+            # Record the transaction
+            transaction = EnhancedTransaction(
+                date=payment.paid_at,
+                amount=payment.amount,
+                currency=payment.currency,
+                category=TransactionCategory.EXPENSE_TEAM,
+                description=payment.description,
+                source=TransactionSource.MANUAL,
+                payment_request_id=payment_id,
+                status="completed"
+            )
+            await self.record_transaction(transaction)
+            
+            return {
+                "success": True,
+                "payment_id": payment_id,
+                "status": payment.status.value,
+                "paid_at": payment.paid_at.isoformat()
+            }
+        except Exception as e:
+            payment.status = PaymentStatus.FAILED
+            raise ValueError(f"Payment processing failed: {str(e)}")
 
 class Project(BaseModel):
     """Track project details and team assignments."""
