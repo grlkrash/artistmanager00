@@ -1,0 +1,1 @@
+"""Artist Manager Agent package.""" 
