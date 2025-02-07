@@ -10,10 +10,7 @@ from .onboarding import OnboardingWizard
 
 class ArtistManagerBot:
     def __init__(self):
-        self.team_manager = TeamManager(
-            coinbase_api_key=os.getenv("COINBASE_API_KEY"),
-            coinbase_api_secret=os.getenv("COINBASE_API_SECRET")
-        )
+        self.team_manager = TeamManager(team_id="default")  # Initialize with a default team ID
         self.onboarding = OnboardingWizard(self)
         
     async def setup_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -21,20 +21,26 @@ class PaymentStatus(str, Enum):
     CANCELLED = "cancelled"
 
 class PaymentRequest(BaseModel):
-    """Payment request model."""
-    id: str = str(uuid.uuid4())
+    """Track payment requests and status."""
+    id: str = None
+    collaborator_id: str
     amount: float
     currency: str = "USD"
     description: str
-    collaborator_id: Optional[str] = None
-    project_id: Optional[str] = None
-    payment_method: Optional[PaymentMethod] = None
+    due_date: Optional[datetime] = None
     status: PaymentStatus = PaymentStatus.PENDING
-    created_at: datetime = datetime.now()
+    created_at: datetime = None
     paid_at: Optional[datetime] = None
+    payment_method: Optional[PaymentMethod] = None
     invoice_link: Optional[str] = None
-    receipt_url: Optional[str] = None
     notes: Optional[str] = None
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        if not self.id:
+            self.id = str(uuid.uuid4())
+        if not self.created_at:
+            self.created_at = datetime.now()
 
 class CollaboratorRole(str, Enum):
     """Collaborator roles."""
@@ -131,29 +137,16 @@ class BudgetTracking(BaseModel):
 class PaymentManager:
     """Handle payment processing."""
     
-    receipt_template = """
-Receipt #{receipt_id}
-Date: {date}
-Amount: {amount} {currency}
-Description: {description}
-Status: {status}
-Payment Method: {payment_method}
-Transaction ID: {transaction_id}
-"""
-
-    def __init__(self, 
-                 stripe_key: Optional[str] = None,
-                 paypal_client_id: Optional[str] = None,
-                 paypal_secret: Optional[str] = None):
-        self.payments: Dict[str, PaymentRequest] = {}
-        self.transactions: Dict[str, EnhancedTransaction] = {}
-        self.accounts: Dict[str, FinancialAccount] = {}
-        self.budgets: Dict[str, BudgetTracking] = {}
-        self.stripe_key = stripe_key
-        self.paypal_credentials = {
-            "client_id": paypal_client_id,
-            "secret": paypal_secret
-        } if paypal_client_id and paypal_secret else None
+    def __init__(self, payments_dict: Optional[Dict] = None):
+        """Initialize the payment manager.
+        
+        Args:
+            payments_dict (Optional[Dict]): Dictionary to store payments, shared with TeamManager.
+        """
+        self.payments = payments_dict if payments_dict is not None else {}
+        self.transactions = {}
+        self.accounts = {}
+        self.budgets = {}
 
     async def create_payment_request(
         self,
@@ -163,7 +156,21 @@ Transaction ID: {transaction_id}
         payment_method: PaymentMethod,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Create a payment request."""
+        """Create a payment request.
+        
+        Args:
+            amount (float): Payment amount.
+            currency (str): Payment currency.
+            description (str): Payment description.
+            payment_method (PaymentMethod): Method of payment.
+            metadata (Optional[Dict[str, Any]]): Additional metadata.
+            
+        Returns:
+            Dict[str, Any]: Payment request details.
+            
+        Raises:
+            ValueError: If amount is not positive or currency is invalid.
+        """
         if amount <= 0:
             raise ValueError("Amount must be positive")
             
@@ -181,42 +188,174 @@ Transaction ID: {transaction_id}
         )
         self.payments[payment_id] = payment_request
             
-        if payment_method == PaymentMethod.CRYPTO and self.stripe_key:
-            # Implement Stripe payment
-            return {
-                "id": payment_id,
-                "payment_url": "https://stripe.com/pay/test",
-                "status": "pending",
-                "expires_at": datetime.now() + timedelta(days=7),
-                "payment_method": PaymentMethod.CRYPTO
+        return {
+            "id": payment_id,
+            "payment_url": None,
+            "status": "pending",
+            "expires_at": datetime.now() + timedelta(days=7),
+            "payment_method": payment_method,
+            "bank_details": {
+                "account": "TEST-ACCOUNT",
+                "routing": "TEST-ROUTING"
             }
-        elif payment_method == PaymentMethod.BANK_TRANSFER and self.paypal_credentials:
-            # Implement PayPal payment
-            return {
-                "id": payment_id,
-                "payment_url": "https://paypal.com/pay/test",
-                "status": "pending",
-                "expires_at": datetime.now() + timedelta(days=7),
-                "payment_method": PaymentMethod.BANK_TRANSFER,
-                "bank_details": {
-                    "account": "TEST-ACCOUNT",
-                    "routing": "TEST-ROUTING"
-                }
-            }
-        else:
-            # Default to manual bank transfer
-            return {
-                "id": payment_id,
-                "payment_url": None,
-                "status": "pending",
-                "expires_at": datetime.now() + timedelta(days=7),
-                "payment_method": PaymentMethod.BANK_TRANSFER,
-                "bank_details": {
-                    "account": "TEST-ACCOUNT",
-                    "routing": "TEST-ROUTING"
-                }
-            }
+        }
+
+    async def generate_receipt(self, payment_id: str) -> Optional[str]:
+        """Generate a receipt for a payment.
+        
+        Args:
+            payment_id (str): The ID of the payment to generate a receipt for.
             
+        Returns:
+            Optional[str]: The formatted receipt, or None if payment not found.
+        """
+        payment = self.payments.get(payment_id)
+        if not payment:
+            return None
+            
+        receipt = f"""Receipt #{payment_id}
+Amount: {int(payment.amount) if payment.amount.is_integer() else payment.amount} {payment.currency}
+Description: {payment.description}
+Status: {payment.status.value.upper()}
+Payment Method: {payment.payment_method.value.upper() if payment.payment_method else 'N/A'}
+Date: {payment.paid_at.strftime('%Y-%m-%d %H:%M:%S') if payment.paid_at else 'Not paid yet'}
+"""
+        return receipt
+
+    async def send_payment_reminder(self, payment_id: str) -> bool:
+        """Send a reminder for a payment.
+        
+        Args:
+            payment_id (str): The ID of the payment to send a reminder for.
+            
+        Returns:
+            bool: True if reminder sent successfully, False otherwise.
+        """
+        payment = self.payments.get(payment_id)
+        if not payment:
+            return False
+            
+        # Only send reminders for payments that aren't paid or cancelled
+        if payment.status not in [PaymentStatus.PAID, PaymentStatus.CANCELLED]:
+            # Format reminder message
+            amount_str = f"{payment.amount:.2f} {payment.currency}"
+            reminder = f"Payment Reminder: {amount_str}\nDescription: {payment.description}"
+            
+            # In a real implementation, this would send an email/notification
+            # For now, just update payment notes
+            if not payment.notes:
+                payment.notes = ""
+            payment.notes += f"\nReminder sent on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            
+            return True
+            
+        return False
+
+    async def process_batch_payments(self, payment_ids: List[str]) -> Dict[str, List[Union[str, Dict[str, Any]]]]:
+        """Process multiple payments in batch.
+        
+        Args:
+            payment_ids (List[str]): List of payment IDs to process.
+            
+        Returns:
+            Dict[str, List[Union[str, Dict[str, Any]]]]: Results of batch processing.
+        """
+        results = {
+            "successful": [],
+            "failed": [],
+            "skipped": []
+        }
+        
+        for payment_id in payment_ids:
+            payment = self.payments.get(payment_id)
+            if not payment or payment.status != PaymentStatus.PENDING:
+                results["skipped"].append(payment_id)
+                continue
+                
+            try:
+                # Process payment
+                payment.status = PaymentStatus.PAID
+                payment.paid_at = datetime.now()
+                
+                results["successful"].append({
+                    "payment_id": payment_id,
+                    "amount": payment.amount,
+                    "currency": payment.currency,
+                    "transaction_id": str(uuid.uuid4())
+                })
+            except Exception as e:
+                payment.status = PaymentStatus.FAILED
+                results["failed"].append(payment_id)
+                
+        return results
+
+    async def get_payment_analytics(
+        self,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """Get analytics for payments within a date range.
+        
+        Args:
+            start_date (Optional[datetime]): Start date for analytics.
+            end_date (Optional[datetime]): End date for analytics.
+            
+        Returns:
+            Dict[str, Any]: Payment analytics data.
+        """
+        analytics = {
+            "total_volume": 0.0,
+            "successful_payments": 0,
+            "failed_payments": 0,
+            "pending_payments": 0,
+            "average_amount": 0.0,
+            "by_payment_method": {},
+            "by_currency": {},
+            "daily_volume": {},
+            "average_processing_time": 0.0
+        }
+        
+        total_amount = 0.0
+        payment_count = 0
+        processing_times = []
+        
+        for payment in self.payments.values():
+            if start_date and payment.created_at < start_date:
+                continue
+            if end_date and payment.created_at > end_date:
+                continue
+                
+            total_amount += payment.amount
+            payment_count += 1
+            
+            if payment.status == PaymentStatus.PAID:
+                analytics["successful_payments"] += 1
+                if payment.paid_at and payment.created_at:
+                    processing_time = (payment.paid_at - payment.created_at).total_seconds()
+                    processing_times.append(processing_time)
+            elif payment.status == PaymentStatus.FAILED:
+                analytics["failed_payments"] += 1
+            elif payment.status == PaymentStatus.PENDING:
+                analytics["pending_payments"] += 1
+                
+            if payment.payment_method:
+                method = payment.payment_method
+                analytics["by_payment_method"][method] = analytics["by_payment_method"].get(method, 0) + 1
+                
+            analytics["by_currency"][payment.currency] = analytics["by_currency"].get(payment.currency, 0) + 1
+            
+            # Update daily volume
+            date_str = payment.created_at.strftime('%Y-%m-%d')
+            analytics["daily_volume"][date_str] = analytics["daily_volume"].get(date_str, 0.0) + payment.amount
+            
+        analytics["total_volume"] = total_amount
+        if payment_count > 0:
+            analytics["average_amount"] = total_amount / payment_count
+        if processing_times:
+            analytics["average_processing_time"] = sum(processing_times) / len(processing_times)
+            
+        return analytics
+
     async def add_financial_account(self, account: FinancialAccount) -> str:
         """Add a new financial account for tracking."""
         self.accounts[account.id] = account
@@ -231,10 +370,10 @@ Transaction ID: {transaction_id}
         new_transaction_ids = []
         
         if account.type == "payment_platform":
-            if account.provider == "stripe" and self.stripe_key:
+            if account.provider == "stripe" and self.stripe_client:
                 # Implement Stripe sync
                 pass
-            elif account.provider == "paypal" and self.paypal_credentials:
+            elif account.provider == "paypal" and self.paypal_client:
                 # Implement PayPal sync
                 pass
                 
@@ -313,163 +452,6 @@ Transaction ID: {transaction_id}
         )
         
         return variance
-
-    async def generate_receipt(self, payment_id: str) -> Optional[str]:
-        """Generate a receipt for a completed payment."""
-        payment = self.payments.get(payment_id)
-        if not payment or payment.status != PaymentStatus.PAID:
-            return None
-
-        receipt_data = {
-            "receipt_id": f"R{payment_id[:8]}",
-            "date": payment.paid_at.strftime("%Y-%m-%d %H:%M:%S") if payment.paid_at else "N/A",
-            "amount": payment.amount,
-            "currency": payment.currency,
-            "description": payment.description,
-            "status": payment.status.value,
-            "payment_method": payment.payment_method.value if payment.payment_method else "N/A",
-            "transaction_id": payment_id
-        }
-        
-        return self.receipt_template.format(**receipt_data)
-
-    async def send_payment_reminder(self, payment_id: str) -> bool:
-        """Send a reminder for pending payments."""
-        payment = self.payments.get(payment_id)
-        if not payment or payment.status != PaymentStatus.PENDING:
-            return False
-
-        try:
-            # Create reminder message
-            reminder = f"""
-Payment Reminder
-
-Amount: {payment.amount} {payment.currency}
-Description: {payment.description}
-Due Date: {payment.due_date.strftime('%Y-%m-%d')}
-Status: {payment.status.value}
-
-Please process this payment at your earliest convenience.
-"""
-            # Log the reminder (in a real implementation, this would send an email or notification)
-            logger.info(f"Payment reminder sent for payment {payment_id}")
-            logger.info(f"Reminder content:\n{reminder}")
-            
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send payment reminder: {str(e)}")
-            return False
-
-    async def process_batch_payments(self, payment_ids: List[str]) -> Dict[str, Any]:
-        """Process multiple payments in batch."""
-        results = {
-            "successful": [],
-            "failed": [],
-            "skipped": []
-        }
-
-        for payment_id in payment_ids:
-            payment = self.payments.get(payment_id)
-            if not payment:
-                results["skipped"].append(payment_id)
-                continue
-
-            if payment.status != PaymentStatus.PENDING:
-                results["skipped"].append(payment_id)
-                continue
-
-            try:
-                # Process the payment
-                payment.status = PaymentStatus.PAID
-                payment.paid_at = datetime.now()
-                
-                # Record the transaction
-                transaction = EnhancedTransaction(
-                    date=payment.paid_at,
-                    amount=payment.amount,
-                    currency=payment.currency,
-                    category=TransactionCategory.EXPENSE_TEAM,
-                    description=payment.description,
-                    source=TransactionSource.MANUAL,
-                    payment_request_id=payment_id,
-                    status="completed"
-                )
-                await self.record_transaction(transaction)
-                
-                results["successful"].append(payment_id)
-            except Exception as e:
-                payment.status = PaymentStatus.FAILED
-                results["failed"].append({
-                    "payment_id": payment_id,
-                    "error": str(e)
-                })
-
-        return results
-
-    async def get_payment_analytics(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
-    ) -> Dict[str, Any]:
-        """Generate payment analytics."""
-        if not start_date:
-            start_date = datetime.now() - timedelta(days=30)
-        if not end_date:
-            end_date = datetime.now()
-
-        analytics = {
-            "total_volume": 0.0,
-            "successful_payments": 0,
-            "failed_payments": 0,
-            "pending_payments": 0,
-            "average_amount": 0.0,
-            "by_payment_method": {},
-            "by_currency": {},
-            "daily_volume": {},
-            "processing_time": []
-        }
-
-        relevant_payments = [
-            p for p in self.payments.values()
-            if start_date <= (p.created_at or datetime.now()) <= end_date
-        ]
-
-        if not relevant_payments:
-            return analytics
-
-        total_amount = 0.0
-        for payment in relevant_payments:
-            # Only include paid payments in total volume
-            if payment.status == PaymentStatus.PAID:
-                analytics["total_volume"] += payment.amount
-                analytics["successful_payments"] += 1
-                if payment.paid_at and payment.created_at:
-                    processing_time = (payment.paid_at - payment.created_at).total_seconds()
-                    analytics["processing_time"].append(processing_time)
-            elif payment.status == PaymentStatus.FAILED:
-                analytics["failed_payments"] += 1
-            elif payment.status == PaymentStatus.PENDING:
-                analytics["pending_payments"] += 1
-
-            total_amount += payment.amount
-
-            # Track by payment method
-            method = payment.payment_method.value if payment.payment_method else "unknown"
-            analytics["by_payment_method"][method] = analytics["by_payment_method"].get(method, 0) + 1
-
-            # Track by currency
-            analytics["by_currency"][payment.currency] = analytics["by_currency"].get(payment.currency, 0) + payment.amount
-
-            # Track daily volume
-            day = payment.created_at.date().isoformat() if payment.created_at else datetime.now().date().isoformat()
-            analytics["daily_volume"][day] = analytics["daily_volume"].get(day, 0) + payment.amount
-
-        # Calculate averages
-        analytics["average_amount"] = total_amount / len(relevant_payments)
-        if analytics["processing_time"]:
-            analytics["average_processing_time"] = sum(analytics["processing_time"]) / len(analytics["processing_time"])
-
-        return analytics
 
     async def process_payment(self, payment_id: str) -> Dict[str, Any]:
         """Process a single payment."""
@@ -609,18 +591,36 @@ class Meeting(BaseModel):
     calendar_events: Dict[str, str] = {}  # collaborator_id -> calendar_event_id
 
 class TeamManager:
-    def __init__(self, coinbase_api_key: Optional[str] = None, coinbase_api_secret: Optional[str] = None):
+    """Manage team members, projects, payments and scheduling."""
+    
+    def __init__(self, team_id: str):
+        """Initialize team manager.
+        
+        Args:
+            team_id: Unique identifier for the team
+        """
+        self.team_id = team_id
         self.collaborators: Dict[str, CollaboratorProfile] = {}
         self.projects: Dict[str, Project] = {}
-        self.payments: Dict[str, PaymentRequest] = {}
-        self.collaborator_requests: List[Dict[str, Any]] = []
-        self.external_db = None  # Will be initialized with Supabase
-        self.market_rates: Dict[str, List[RateRange]] = {}
-        self.payment_manager = PaymentManager(coinbase_api_key, coinbase_api_secret)
-        self.transactions: Dict[str, FinancialTransaction] = {}
-        self.budget_allocations: Dict[str, List[BudgetAllocation]] = {}
+        self.collaborator_requests: Dict[str, Dict] = {}
+        self.market_rates: Dict[str, RateRange] = {}
         self.calendar_integrations: Dict[str, CalendarIntegration] = {}
         self.meetings: Dict[str, Meeting] = {}
+        self.external_db = None
+        
+        # Initialize shared payments dictionary
+        self.payments: Dict[str, PaymentRequest] = {}
+        # Initialize PaymentManager with shared payments dictionary
+        self.payment_manager = PaymentManager(payments_dict=self.payments)
+
+    def set_payments(self, payments: Dict[str, PaymentRequest]) -> None:
+        """Set the payments dictionary and update payment manager.
+        
+        Args:
+            payments: Dictionary of payment requests to use
+        """
+        self.payments = payments
+        self.payment_manager = PaymentManager(payments_dict=self.payments)
 
     async def initialize_external_db(self, supabase_client):
         """Initialize external database connection."""
@@ -646,7 +646,7 @@ class TeamManager:
             "status": "pending",
             "created_at": datetime.now()
         }
-        self.collaborator_requests.append(request)
+        self.collaborator_requests[request_id] = request
         
         # If we have external DB access, store the request
         if self.external_db:
@@ -838,31 +838,21 @@ class TeamManager:
         }
 
     async def create_payment_request(self, request: PaymentRequest) -> Dict[str, Any]:
-        """Create a new payment request with payment processing."""
-        # Store payment request
+        """Create a new payment request."""
+        if not request.id:
+            request.id = str(uuid.uuid4())
+        
+        # Store in shared dictionary
         self.payments[request.id] = request
         
-        # Create actual payment request with payment provider
-        payment_result = await self.payment_manager.create_payment_request(
+        # Process through payment manager
+        return await self.payment_manager.create_payment_request(
             amount=request.amount,
             currency=request.currency,
             description=request.description,
             payment_method=request.payment_method,
-            metadata={
-                "collaborator_id": request.collaborator_id,
-                "payment_request_id": request.id
-            }
+            metadata={"collaborator_id": request.collaborator_id}
         )
-        
-        # Update payment request with provider details
-        request.payment_method = request.payment_method
-        request.invoice_link = payment_result["payment_url"]
-        
-        # Store in external DB if available
-        if self.external_db:
-            await self.external_db.table("payments").insert(request.dict()).execute()
-        
-        return payment_result
 
     async def check_payment_status(self, payment_id: str) -> Dict[str, Any]:
         """Check payment status and update records."""
@@ -1123,7 +1113,7 @@ class TeamManager:
                 "thursday": 0, "friday": 0, "saturday": 0, "sunday": 0
             },
             "active_projects_by_role": {},
-            "average_project_team_size": 0
+            "average_team_size": 0
         }
         
         # Role distribution and availability
@@ -1157,10 +1147,12 @@ class TeamManager:
                             analytics["active_projects_by_role"].get(role, 0) + 1
                         )
                         
-        # Calculate average team size
-        if self.projects:
-            analytics["average_project_team_size"] = total_team_size / len(self.projects)
-            
+                        if self.projects:
+                            total_team_size = sum(len(p.team_members) for p in self.projects.values())
+                            analytics["average_team_size"] = total_team_size / len(self.projects)
+                        else:
+                            analytics["average_team_size"] = 0
+        
         return analytics
 
     async def get_project_analytics(self, project_id: str) -> Dict[str, Any]:
@@ -1187,7 +1179,7 @@ class TeamManager:
         # Calculate duration
         if project.end_date and project.start_date:
             analytics["duration"] = (project.end_date - project.start_date).days
-            
+
         # Team role distribution
         for member_id in project.team_members:
             if member_id in self.collaborators:
@@ -1302,7 +1294,7 @@ class TeamManager:
         report.extend([
             "",
             "📊 Project Statistics",
-            f"Average Team Size: {analytics['average_project_team_size']:.1f} members"
+            f"Average Team Size: {analytics['average_team_size']:.1f} members"
         ])
         
         return "\n".join(report) 

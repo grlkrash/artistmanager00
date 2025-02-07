@@ -36,6 +36,16 @@
 - [📧 Contact](#-contact)
 - [📝 License](#-license)
 - [🔒 Legal and Privacy](#-legal-and-privacy)
+- [🔍 Testing](#-testing)
+  - [Running Tests](#running-tests)
+  - [Test Structure](#test-structure)
+- [🚀 Running the Bot](#-running-the-bot)
+- [🔧 Development](#-development)
+  - [Code Style](#code-style)
+  - [Pre-commit Hooks](#pre-commit-hooks)
+- [🚀 Deployment](#-deployment)
+- [🔍 Monitoring](#-monitoring)
+- [🔮 Future Improvements](#-future-improvements)
 
 ## 📖 Overview
 
@@ -196,4 +206,150 @@ AgentKit is licensed under the [Apache-2.0](LICENSE.md) license.
 
 ## 🔒 Legal and Privacy
 
-The AgentKit software is novel and experimental, and is therefore provided on an AS-IS basis. The software is intended to be used only for the purposes of assisting with designing blockchain transactions and enabling other API integrations using natural language inputs, and is not intended to provide (i) an offer, or solicitation of an offer, to invest in, or to buy or sell, any interests or shares, or to participate in any investment or trading strategy, (ii) accounting, legal, tax advice, investment recommendations or other professional advice or (iii) an official statement of Coinbase. Acts proposed or performed by an agent through AgentKit software are NOT acts of Coinbase. You should consult with a professional advisor before making any decisions based on the information provided by the software. You are not permitted to use the proceeds of loans or credit to purchase digital assets on or through coinbase.com, Coinbase's APIs, the Coinbase mobile application, or any other Coinbase website or product, including AgentKit. No representation or warranty is made, expressed or implied, with respect to the accuracy, completeness, reliability, security, or suitability of the software or to any information provided in connection with the software. The risk of loss through use of the software can be substantial, and you assume any and all risks of loss and liability. The software may produce output that is inaccurate, incorrect, unpredictable or undesirable, and it is the user’s exclusive responsibility to evaluate the output and the use-case and determine whether it is appropriate. The right to use the software is contingent on your agreement to the [CDP Terms of Service](https://www.coinbase.com/legal/developer-platform/terms-of-service) (except to the extent it conflicts with the Apache-2.0 license).
+The AgentKit software is novel and experimental, and is therefore provided on an AS-IS basis. The software is intended to be used only for the purposes of assisting with designing blockchain transactions and enabling other API integrations using natural language inputs, and is not intended to provide (i) an offer, or solicitation of an offer, to invest in, or to buy or sell, any interests or shares, or to participate in any investment or trading strategy, (ii) accounting, legal, tax advice, investment recommendations or other professional advice or (iii) an official statement of Coinbase. Acts proposed or performed by an agent through AgentKit software are NOT acts of Coinbase. You should consult with a professional advisor before making any decisions based on the information provided by the software. You are not permitted to use the proceeds of loans or credit to purchase digital assets on or through coinbase.com, Coinbase's APIs, the Coinbase mobile application, or any other Coinbase website or product, including AgentKit. No representation or warranty is made, expressed or implied, with respect to the accuracy, completeness, reliability, security, or suitability of the software or to any information provided in connection with the software. The risk of loss through use of the software can be substantial, and you assume any and all risks of loss and liability. The software may produce output that is inaccurate, incorrect, unpredictable or undesirable, and it is the user's exclusive responsibility to evaluate the output and the use-case and determine whether it is appropriate. The right to use the software is contingent on your agreement to the [CDP Terms of Service](https://www.coinbase.com/legal/developer-platform/terms-of-service) (except to the extent it conflicts with the Apache-2.0 license).
+
+## 🔍 Testing
+
+### Running Tests
+
+1. Set up test environment:
+```bash
+cp .env.example .env.test
+# Edit .env.test with your test configuration
+```
+
+2. Install test dependencies:
+```bash
+pip install -r requirements-dev.txt
+```
+
+3. Run tests:
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_bot_integration.py
+
+# Run with coverage report
+pytest --cov=artist_manager_agent tests/
+```
+
+### Test Structure
+
+- `tests/test_bot_integration.py`: Bot command and flow integration tests
+- `tests/test_music_services.py`: Music service integration tests
+- `tests/test_payments.py`: Payment system unit tests
+- `tests/test_team_management.py`: Team management unit tests
+- `tests/test_financial_tracking.py`: Financial tracking unit tests
+
+## 🚀 Running the Bot
+
+1. Set up environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
+
+2. Initialize the database:
+```bash
+python scripts/init_db.py
+```
+
+3. Start the bot:
+```bash
+python main.py
+```
+
+## 🔧 Development
+
+### Code Style
+
+The project uses:
+- Black for code formatting
+- isort for import sorting
+- mypy for type checking
+
+Run formatting:
+```bash
+black .
+isort .
+```
+
+Check types:
+```bash
+mypy .
+```
+
+### Pre-commit Hooks
+
+1. Install pre-commit:
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+2. Run hooks:
+```bash
+pre-commit run --all-files
+```
+
+## 🚀 Deployment
+
+1. Build Docker image:
+```bash
+docker build -t artist-manager-bot .
+```
+
+2. Run container:
+```bash
+docker run -d --env-file .env artist-manager-bot
+```
+
+## 🔍 Monitoring
+
+The bot includes:
+- Logging to stdout/stderr
+- Error tracking
+- Performance metrics
+- Health checks
+
+Monitor using:
+```bash
+# View logs
+docker logs -f artist-manager-bot
+
+# Check health
+curl http://localhost:8080/health
+
+# View metrics
+curl http://localhost:8080/metrics
+```
+
+## 🔮 Future Improvements
+
+1. **Features**
+   - Multi-language support
+   - Advanced analytics dashboard
+   - AI-powered content generation
+   - Automated social media scheduling
+   - Enhanced payment integrations
+
+2. **Technical**
+   - Microservices architecture
+   - GraphQL API
+   - Real-time notifications
+   - Caching layer
+   - Rate limiting
+
+3. **Testing**
+   - E2E test suite
+   - Performance testing
+   - Load testing
+   - Security testing
+
+4. **Documentation**
+   - API documentation
+   - Integration guides
+   - Contribution guidelines
+   - Deployment strategies

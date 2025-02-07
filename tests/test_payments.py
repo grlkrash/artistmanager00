@@ -222,7 +222,7 @@ async def test_generate_receipt(bot, mock_update, mock_context):
         status=PaymentStatus.PAID,
         paid_at=datetime.now()
     )
-    bot.team_manager.payments = {"payment123": payment}
+    bot.team_manager.set_payments({"payment123": payment})
     
     receipt = await bot.team_manager.payment_manager.generate_receipt("payment123")
     assert receipt is not None
@@ -245,7 +245,7 @@ async def test_send_payment_reminder(bot, mock_update, mock_context):
         payment_method=PaymentMethod.CRYPTO,
         status=PaymentStatus.PENDING
     )
-    bot.team_manager.payments = {"payment123": payment}
+    bot.team_manager.set_payments({"payment123": payment})
     
     success = await bot.team_manager.payment_manager.send_payment_reminder("payment123")
     assert success is True
@@ -274,7 +274,7 @@ async def test_process_batch_payments(bot, mock_update, mock_context):
             status=PaymentStatus.PENDING
         )
     }
-    bot.team_manager.payments = payments
+    bot.team_manager.set_payments(payments)
     
     results = await bot.team_manager.payment_manager.process_batch_payments(["payment1", "payment2", "nonexistent"])
     assert len(results["successful"]) > 0
@@ -320,7 +320,7 @@ async def test_get_payment_analytics(bot, mock_update, mock_context):
             created_at=week_ago
         )
     }
-    bot.team_manager.payments = payments
+    bot.team_manager.set_payments(payments)
     
     analytics = await bot.team_manager.payment_manager.get_payment_analytics(
         start_date=week_ago,
