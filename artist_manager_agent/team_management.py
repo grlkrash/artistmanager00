@@ -1,10 +1,60 @@
 from typing import Dict, List, Optional, Union, Any
 import uuid
 from datetime import datetime
-from log import logger
+from .log import logger
 from pydantic import BaseModel
 from coinbase.wallet.client import Client as CoinbaseClient
 from enum import Enum
+
+class PaymentMethod(str, Enum):
+    """Payment methods."""
+    CRYPTO = "crypto"
+    BANK_TRANSFER = "bank_transfer"
+    CREDIT_CARD = "credit_card"
+
+class PaymentStatus(str, Enum):
+    """Payment status."""
+    PENDING = "pending"
+    PAID = "paid"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+class PaymentRequest(BaseModel):
+    """Payment request model."""
+    id: str = str(uuid.uuid4())
+    amount: float
+    currency: str = "USD"
+    description: str
+    collaborator_id: Optional[str] = None
+    project_id: Optional[str] = None
+    payment_method: Optional[PaymentMethod] = None
+    status: PaymentStatus = PaymentStatus.PENDING
+    created_at: datetime = datetime.now()
+    paid_at: Optional[datetime] = None
+    invoice_link: Optional[str] = None
+    receipt_url: Optional[str] = None
+    notes: Optional[str] = None
+
+class CollaboratorRole(str, Enum):
+    """Collaborator roles."""
+    ARTIST = "artist"
+    PRODUCER = "producer"
+    MANAGER = "manager"
+    SONGWRITER = "songwriter"
+    ENGINEER = "engineer"
+
+class CollaboratorProfile(BaseModel):
+    """Collaborator profile model."""
+    id: str = str(uuid.uuid4())
+    name: str
+    role: CollaboratorRole
+    expertise: List[str]
+    rate: Optional[float] = None
+    currency: str = "USD"
+    location: Optional[str] = None
+    availability: Dict[str, List[str]] = {}  # day -> list of time slots
+    portfolio_link: Optional[str] = None
+    created_at: datetime = datetime.now()
 
 class RateRange(BaseModel):
     """Market rate ranges for different roles."""
@@ -15,12 +65,6 @@ class RateRange(BaseModel):
     location: Optional[str] = None
     experience_level: Optional[str] = None  # junior, mid, senior
     updated_at: datetime = datetime.now()
-
-class PaymentMethod(str, Enum):
-    """Payment methods."""
-    CRYPTO = "crypto"
-    BANK_TRANSFER = "bank_transfer"
-    CREDIT_CARD = "credit_card"
 
 class PaymentManager:
     """Handle payment processing."""
@@ -79,6 +123,56 @@ class PaymentManager:
                 return {"status": "error", "message": str(e)}
         return {"status": "error", "message": "Payment provider not configured"}
 
+class Project(BaseModel):
+    """Track project details and team assignments."""
+    id: str = str(uuid.uuid4())
+    name: str
+    description: str
+    start_date: datetime
+    end_date: Optional[datetime] = None
+    status: str = "active"  # active, completed, cancelled, on_hold
+    team_members: List[str] = []  # collaborator_ids
+    budget: Optional[float] = None
+    deliverables: List[str] = []
+    milestones: List[Dict] = []
+    notes: Optional[str] = None
+
+class BudgetCategory(str, Enum):
+    """Budget categories for financial tracking."""
+    PRODUCTION = "production"
+    MIXING = "mixing"
+    MASTERING = "mastering"
+    MARKETING = "marketing"
+    DISTRIBUTION = "distribution"
+    OTHER = "other"
+
+class FinancialTransaction(BaseModel):
+    """Track financial transactions."""
+    id: str = str(uuid.uuid4())
+    amount: float
+    currency: str = "USD"
+    category: BudgetCategory
+    description: str
+    date: datetime = datetime.now()
+    project_id: Optional[str] = None
+    collaborator_id: Optional[str] = None
+    payment_id: Optional[str] = None
+    transaction_type: str  # income, expense, payment
+    status: str = "pending"  # pending, completed, cancelled
+    tax_category: Optional[str] = None
+    receipt_url: Optional[str] = None
+
+class BudgetAllocation(BaseModel):
+    """Track budget allocations."""
+    category: BudgetCategory
+    amount: float
+    currency: str = "USD"
+    project_id: Optional[str] = None
+    period_start: datetime
+    period_end: datetime
+    actual_spend: float = 0.0
+    notes: Optional[str] = None
+
 class TeamManager:
     def __init__(self, coinbase_api_key: Optional[str] = None, coinbase_api_secret: Optional[str] = None):
         self.collaborators: Dict[str, CollaboratorProfile] = {}
@@ -88,6 +182,8 @@ class TeamManager:
         self.external_db = None  # Will be initialized with Supabase
         self.market_rates: Dict[str, List[RateRange]] = {}
         self.payment_manager = PaymentManager(coinbase_api_key, coinbase_api_secret)
+        self.transactions: Dict[str, FinancialTransaction] = {}
+        self.budget_allocations: Dict[str, List[BudgetAllocation]] = {}
 
     async def initialize_external_db(self, supabase_client):
         """Initialize external database connection."""
@@ -346,3 +442,570 @@ class TeamManager:
                 await self.external_db.table("payments").update(payment.dict()).eq("id", payment_id).execute()
         
         return status 
+
+    async def add_collaborator(self, profile: CollaboratorProfile) -> str:
+        """Add a new collaborator to the team."""
+        if not profile.id:
+            profile.id = str(uuid.uuid4())
+        self.collaborators[profile.id] = profile
+        return profile.id
+
+    async def get_collaborator(self, collaborator_id: str) -> Optional[CollaboratorProfile]:
+        """Get collaborator profile by ID."""
+        return self.collaborators.get(collaborator_id)
+
+    async def update_collaborator(
+        self,
+        collaborator_id: str,
+        updates: Dict
+    ) -> Optional[CollaboratorProfile]:
+        """Update collaborator profile."""
+        if collaborator_id not in self.collaborators:
+            return None
+            
+        profile = self.collaborators[collaborator_id]
+        for key, value in updates.items():
+            if hasattr(profile, key):
+                setattr(profile, key, value)
+                
+        return profile
+
+    async def remove_collaborator(self, collaborator_id: str) -> bool:
+        """Remove a collaborator from the team."""
+        if collaborator_id not in self.collaborators:
+            return False
+            
+        # Remove from projects
+        for project in self.projects.values():
+            if collaborator_id in project.team_members:
+                project.team_members.remove(collaborator_id)
+                
+        del self.collaborators[collaborator_id]
+        return True
+
+    async def create_project(self, project: Project) -> str:
+        """Create a new project."""
+        if not project.id:
+            project.id = str(uuid.uuid4())
+        self.projects[project.id] = project
+        return project.id
+
+    async def update_project(
+        self,
+        project_id: str,
+        updates: Dict
+    ) -> Optional[Project]:
+        """Update project details."""
+        if project_id not in self.projects:
+            return None
+            
+        project = self.projects[project_id]
+        for key, value in updates.items():
+            if hasattr(project, key):
+                setattr(project, key, value)
+                
+        return project
+
+    async def assign_to_project(
+        self,
+        project_id: str,
+        collaborator_id: str,
+        role: Optional[str] = None
+    ) -> bool:
+        """Assign a collaborator to a project."""
+        if (project_id not in self.projects or 
+            collaborator_id not in self.collaborators):
+            return False
+            
+        project = self.projects[project_id]
+        if collaborator_id not in project.team_members:
+            project.team_members.append(collaborator_id)
+            
+        return True
+
+    async def remove_from_project(
+        self,
+        project_id: str,
+        collaborator_id: str
+    ) -> bool:
+        """Remove a collaborator from a project."""
+        if (project_id not in self.projects or 
+            collaborator_id not in self.collaborators):
+            return False
+            
+        project = self.projects[project_id]
+        if collaborator_id in project.team_members:
+            project.team_members.remove(collaborator_id)
+            
+        return True
+
+    async def get_project_team(self, project_id: str) -> List[CollaboratorProfile]:
+        """Get all team members assigned to a project."""
+        if project_id not in self.projects:
+            return []
+            
+        project = self.projects[project_id]
+        return [
+            self.collaborators[member_id]
+            for member_id in project.team_members
+            if member_id in self.collaborators
+        ]
+
+    async def get_collaborator_projects(
+        self,
+        collaborator_id: str
+    ) -> List[Project]:
+        """Get all projects a collaborator is assigned to."""
+        if collaborator_id not in self.collaborators:
+            return []
+            
+        return [
+            project for project in self.projects.values()
+            if collaborator_id in project.team_members
+        ]
+
+    async def add_project_milestone(
+        self,
+        project_id: str,
+        milestone: Dict
+    ) -> bool:
+        """Add a milestone to a project."""
+        if project_id not in self.projects:
+            return False
+            
+        project = self.projects[project_id]
+        milestone["id"] = str(uuid.uuid4())
+        milestone["created_at"] = datetime.now()
+        project.milestones.append(milestone)
+        return True
+
+    async def update_milestone_status(
+        self,
+        project_id: str,
+        milestone_id: str,
+        status: str
+    ) -> bool:
+        """Update the status of a project milestone."""
+        if project_id not in self.projects:
+            return False
+            
+        project = self.projects[project_id]
+        for milestone in project.milestones:
+            if milestone["id"] == milestone_id:
+                milestone["status"] = status
+                milestone["updated_at"] = datetime.now()
+                return True
+                
+        return False
+
+    async def get_team_availability(
+        self,
+        date: datetime,
+        role: Optional[CollaboratorRole] = None
+    ) -> Dict[str, List[str]]:
+        """Get team availability for a specific date."""
+        availability = {}
+        day_name = date.strftime("%A").lower()
+        
+        for collaborator in self.collaborators.values():
+            if role and collaborator.role != role:
+                continue
+                
+            if day_name in collaborator.availability:
+                availability[collaborator.id] = collaborator.availability[day_name]
+                
+        return availability
+
+    async def find_common_availability(
+        self,
+        collaborator_ids: List[str],
+        date: datetime
+    ) -> List[str]:
+        """Find common available time slots for a group of collaborators."""
+        availabilities = []
+        day_name = date.strftime("%A").lower()
+        
+        for collaborator_id in collaborator_ids:
+            if collaborator_id in self.collaborators:
+                collaborator = self.collaborators[collaborator_id]
+                if day_name in collaborator.availability:
+                    availabilities.append(set(collaborator.availability[day_name]))
+                    
+        if not availabilities:
+            return []
+            
+        common_slots = availabilities[0]
+        for slots in availabilities[1:]:
+            common_slots &= slots
+            
+        return sorted(list(common_slots))
+
+    async def get_team_analytics(self) -> Dict[str, Any]:
+        """Get analytics about team composition and project distribution."""
+        analytics = {
+            "total_collaborators": len(self.collaborators),
+            "total_projects": len(self.projects),
+            "role_distribution": {},
+            "project_status": {},
+            "availability_by_day": {
+                "monday": 0, "tuesday": 0, "wednesday": 0,
+                "thursday": 0, "friday": 0, "saturday": 0, "sunday": 0
+            },
+            "active_projects_by_role": {},
+            "average_project_team_size": 0
+        }
+        
+        # Role distribution and availability
+        for collaborator in self.collaborators.values():
+            # Count roles
+            role = collaborator.role.value
+            analytics["role_distribution"][role] = analytics["role_distribution"].get(role, 0) + 1
+            
+            # Count availability
+            for day in collaborator.availability:
+                analytics["availability_by_day"][day] += 1
+                
+        # Project statistics
+        total_team_size = 0
+        for project in self.projects.values():
+            # Project status distribution
+            analytics["project_status"][project.status] = (
+                analytics["project_status"].get(project.status, 0) + 1
+            )
+            
+            # Team size
+            team_size = len(project.team_members)
+            total_team_size += team_size
+            
+            # Count projects by role
+            for member_id in project.team_members:
+                if member_id in self.collaborators:
+                    role = self.collaborators[member_id].role.value
+                    if project.status == "active":
+                        analytics["active_projects_by_role"][role] = (
+                            analytics["active_projects_by_role"].get(role, 0) + 1
+                        )
+                        
+        # Calculate average team size
+        if self.projects:
+            analytics["average_project_team_size"] = total_team_size / len(self.projects)
+            
+        return analytics
+
+    async def get_project_analytics(self, project_id: str) -> Dict[str, Any]:
+        """Get detailed analytics for a specific project."""
+        if project_id not in self.projects:
+            return {}
+            
+        project = self.projects[project_id]
+        analytics = {
+            "project_name": project.name,
+            "status": project.status,
+            "duration": None,
+            "team_size": len(project.team_members),
+            "role_distribution": {},
+            "milestone_completion": {
+                "total": len(project.milestones),
+                "completed": 0,
+                "in_progress": 0,
+                "pending": 0
+            },
+            "budget_utilization": None
+        }
+        
+        # Calculate duration
+        if project.end_date and project.start_date:
+            analytics["duration"] = (project.end_date - project.start_date).days
+            
+        # Team role distribution
+        for member_id in project.team_members:
+            if member_id in self.collaborators:
+                role = self.collaborators[member_id].role.value
+                analytics["role_distribution"][role] = (
+                    analytics["role_distribution"].get(role, 0) + 1
+                )
+                
+        # Milestone statistics
+        for milestone in project.milestones:
+            status = milestone.get("status", "pending")
+            analytics["milestone_completion"][status] = (
+                analytics["milestone_completion"].get(status, 0) + 1
+            )
+            
+        # Budget utilization if budget is set
+        if project.budget:
+            # You would typically track actual costs in a real application
+            analytics["budget_utilization"] = {
+                "total_budget": project.budget,
+                "remaining": project.budget  # Placeholder
+            }
+            
+        return analytics
+
+    async def get_collaborator_performance(
+        self,
+        collaborator_id: str,
+        date_range: Optional[tuple] = None
+    ) -> Dict[str, Any]:
+        """Get performance metrics for a specific collaborator."""
+        if collaborator_id not in self.collaborators:
+            return {}
+            
+        collaborator = self.collaborators[collaborator_id]
+        performance = {
+            "name": collaborator.name,
+            "role": collaborator.role.value,
+            "projects": {
+                "total": 0,
+                "active": 0,
+                "completed": 0
+            },
+            "milestones": {
+                "total": 0,
+                "completed": 0,
+                "in_progress": 0
+            },
+            "availability_score": 0,  # Percentage of work hours available
+            "project_completion_rate": 0
+        }
+        
+        # Project statistics
+        completed_projects = 0
+        for project in self.projects.values():
+            if collaborator_id in project.team_members:
+                performance["projects"]["total"] += 1
+                if project.status == "active":
+                    performance["projects"]["active"] += 1
+                elif project.status == "completed":
+                    performance["projects"]["completed"] += 1
+                    completed_projects += 1
+                    
+        # Calculate project completion rate
+        if performance["projects"]["total"] > 0:
+            performance["project_completion_rate"] = (
+                completed_projects / performance["projects"]["total"]
+            )
+            
+        # Calculate availability score
+        total_slots = 0
+        available_slots = 0
+        for day, slots in collaborator.availability.items():
+            total_slots += 8  # Assuming 8 working hours per day
+            available_slots += len(slots)
+        if total_slots > 0:
+            performance["availability_score"] = available_slots / total_slots
+            
+        return performance
+
+    async def generate_team_report(self) -> str:
+        """Generate a comprehensive team status report."""
+        analytics = await self.get_team_analytics()
+        
+        report = [
+            "Team Status Report",
+            f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            "👥 Team Composition",
+            f"Total Collaborators: {analytics['total_collaborators']}",
+            "",
+            "Role Distribution:"
+        ]
+        
+        for role, count in analytics["role_distribution"].items():
+            report.append(f"- {role}: {count}")
+            
+        report.extend([
+            "",
+            "📈 Project Status",
+            f"Total Projects: {analytics['total_projects']}"
+        ])
+        
+        for status, count in analytics["project_status"].items():
+            report.append(f"- {status}: {count}")
+            
+        report.extend([
+            "",
+            "⏰ Team Availability",
+            "Daily Availability (number of team members):"
+        ])
+        
+        for day, count in analytics["availability_by_day"].items():
+            report.append(f"- {day.capitalize()}: {count}")
+            
+        report.extend([
+            "",
+            "📊 Project Statistics",
+            f"Average Team Size: {analytics['average_project_team_size']:.1f} members"
+        ])
+        
+        return "\n".join(report) 
+
+    async def record_transaction(self, transaction: FinancialTransaction) -> str:
+        """Record a financial transaction."""
+        self.transactions[transaction.id] = transaction
+        if self.external_db:
+            await self.external_db.table("transactions").insert(transaction.dict()).execute()
+        return transaction.id
+
+    async def set_project_budget(
+        self,
+        project_id: str,
+        allocations: List[BudgetAllocation]
+    ) -> bool:
+        """Set or update project budget allocations."""
+        if project_id not in self.projects:
+            return False
+        
+        self.budget_allocations[project_id] = allocations
+        self.projects[project_id].budget = sum(a.amount for a in allocations)
+        
+        if self.external_db:
+            await self.external_db.table("budget_allocations").upsert(
+                [{"project_id": project_id, **a.dict()} for a in allocations]
+            ).execute()
+        
+        return True
+
+    async def get_financial_report(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        project_id: Optional[str] = None,
+        categories: Optional[List[BudgetCategory]] = None
+    ) -> Dict[str, Any]:
+        """Generate a financial report for the specified period."""
+        transactions = [
+            t for t in self.transactions.values()
+            if start_date <= t.date <= end_date
+            and (not project_id or t.project_id == project_id)
+            and (not categories or t.category in categories)
+        ]
+        
+        report = {
+            "period": {
+                "start": start_date,
+                "end": end_date
+            },
+            "summary": {
+                "total_income": 0.0,
+                "total_expenses": 0.0,
+                "net": 0.0
+            },
+            "by_category": {},
+            "by_project": {},
+            "pending_payments": [],
+            "tax_summary": {
+                "deductible_expenses": 0.0,
+                "income_by_category": {}
+            }
+        }
+        
+        for t in transactions:
+            # Update summary
+            if t.transaction_type == "income":
+                report["summary"]["total_income"] += t.amount
+            else:
+                report["summary"]["total_expenses"] += t.amount
+                
+            # Update category breakdown
+            cat = t.category.value
+            if cat not in report["by_category"]:
+                report["by_category"][cat] = {
+                    "income": 0.0,
+                    "expenses": 0.0,
+                    "budget": 0.0,
+                    "remaining": 0.0
+                }
+            if t.transaction_type == "income":
+                report["by_category"][cat]["income"] += t.amount
+            else:
+                report["by_category"][cat]["expenses"] += t.amount
+                
+            # Update project breakdown
+            if t.project_id:
+                if t.project_id not in report["by_project"]:
+                    report["by_project"][t.project_id] = {
+                        "income": 0.0,
+                        "expenses": 0.0,
+                        "budget": self.projects[t.project_id].budget if t.project_id in self.projects else 0.0
+                    }
+                if t.transaction_type == "income":
+                    report["by_project"][t.project_id]["income"] += t.amount
+                else:
+                    report["by_project"][t.project_id]["expenses"] += t.amount
+                    
+            # Track pending payments
+            if t.status == "pending" and t.transaction_type == "payment":
+                report["pending_payments"].append({
+                    "id": t.id,
+                    "amount": t.amount,
+                    "description": t.description,
+                    "collaborator_id": t.collaborator_id
+                })
+                
+            # Update tax summary
+            if t.tax_category:
+                if t.transaction_type == "expense":
+                    report["tax_summary"]["deductible_expenses"] += t.amount
+                else:
+                    if t.tax_category not in report["tax_summary"]["income_by_category"]:
+                        report["tax_summary"]["income_by_category"][t.tax_category] = 0.0
+                    report["tax_summary"]["income_by_category"][t.tax_category] += t.amount
+        
+        # Calculate net and budget remaining
+        report["summary"]["net"] = report["summary"]["total_income"] - report["summary"]["total_expenses"]
+        
+        # Add budget vs actual for categories
+        for project_id, allocations in self.budget_allocations.items():
+            if project_id == project_id or not project_id:
+                for allocation in allocations:
+                    cat = allocation.category.value
+                    if cat in report["by_category"]:
+                        report["by_category"][cat]["budget"] += allocation.amount
+                        report["by_category"][cat]["remaining"] = (
+                            allocation.amount - report["by_category"][cat]["expenses"]
+                        )
+        
+        return report
+
+    async def get_tax_report(self, tax_year: int) -> Dict[str, Any]:
+        """Generate a tax report for the specified year."""
+        start_date = datetime(tax_year, 1, 1)
+        end_date = datetime(tax_year, 12, 31, 23, 59, 59)
+        
+        report = await self.get_financial_report(start_date, end_date)
+        
+        # Add tax-specific calculations
+        tax_report = {
+            "year": tax_year,
+            "gross_income": report["summary"]["total_income"],
+            "total_expenses": report["summary"]["total_expenses"],
+            "net_income": report["summary"]["net"],
+            "deductible_expenses": report["tax_summary"]["deductible_expenses"],
+            "income_by_category": report["tax_summary"]["income_by_category"],
+            "expense_categories": {},
+            "collaborator_payments": {}
+        }
+        
+        # Categorize expenses for tax purposes
+        for t in self.transactions.values():
+            if start_date <= t.date <= end_date and t.transaction_type == "expense":
+                cat = t.category.value
+                if cat not in tax_report["expense_categories"]:
+                    tax_report["expense_categories"][cat] = 0.0
+                tax_report["expense_categories"][cat] += t.amount
+                
+                # Track payments to collaborators
+                if t.collaborator_id:
+                    if t.collaborator_id not in tax_report["collaborator_payments"]:
+                        collaborator = self.collaborators.get(t.collaborator_id)
+                        tax_report["collaborator_payments"][t.collaborator_id] = {
+                            "name": collaborator.name if collaborator else "Unknown",
+                            "total_paid": 0.0,
+                            "payment_ids": []
+                        }
+                    tax_report["collaborator_payments"][t.collaborator_id]["total_paid"] += t.amount
+                    if t.payment_id:
+                        tax_report["collaborator_payments"][t.collaborator_id]["payment_ids"].append(t.payment_id)
+        
+        return tax_report 
