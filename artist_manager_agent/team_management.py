@@ -631,47 +631,56 @@ class TeamManager:
         collaborator_ids: List[str],
         date: datetime
     ) -> List[str]:
-        """Find common available time slots for a group of collaborators."""
+        """Find common availability slots for multiple collaborators on a given date."""
         day_name = date.strftime("%A").lower()
-        all_slots = []
         
-        # Get all collaborators' availability for the day
-        for collaborator_id in collaborator_ids:
-            if collaborator_id in self.collaborators:
-                collaborator = self.collaborators[collaborator_id]
-                if day_name in collaborator.availability:
-                    slots = []
-                    for slot in collaborator.availability[day_name]:
-                        start, end = slot.split("-")
-                        # Convert to minutes for easier comparison
-                        start_mins = self._time_to_minutes(start)
-                        end_mins = self._time_to_minutes(end)
-                        slots.append((start_mins, end_mins))
-                    all_slots.append(slots)
-                    
-        if not all_slots:
-            return []
+        # Collect all slots with validation
+        slots_by_collaborator = []
+        for collab_id in collaborator_ids:
+            collaborator = self.collaborators.get(collab_id)
+            if not collaborator or day_name not in collaborator.availability:
+                return []
             
-        # Find common slots
-        common_slots = all_slots[0]
-        for slots in all_slots[1:]:
-            new_common = []
-            for s1_start, s1_end in common_slots:
-                for s2_start, s2_end in slots:
-                    # Take the later start time and earlier end time
-                    start = max(s1_start, s2_start)
-                    end = min(s1_end, s2_end)
-                    
-                    # Only add if it's a valid time slot (start < end)
-                    if start < end:
-                        new_common.append((start, end))
-            common_slots = new_common
-            if not common_slots:  # No overlapping slots found
+            slots = collaborator.availability[day_name]
+            if not slots:
                 return []
                 
-        # Convert back to time string format
-        return [f"{self._minutes_to_time(start)}-{self._minutes_to_time(end)}" 
-                for start, end in sorted(common_slots)]
+            # Validate time format and collect slots
+            for slot in slots:
+                try:
+                    start, end = slot.split("-")
+                    # Validate HH:MM format
+                    if not all(t.replace(":", "").isdigit() and len(t) == 5 for t in (start, end)):
+                        return []
+                    # Validate start is before end
+                    if start >= end:
+                        return []
+                    slots_by_collaborator.append({"start": start, "end": end})
+                except ValueError:
+                    return []
+        
+        if not slots_by_collaborator:
+            return []
+            
+        # Find the most restrictive time range
+        latest_start = max(slot["start"] for slot in slots_by_collaborator)
+        
+        # Find earliest end time among slots that include the latest start time
+        valid_slots = [
+            slot for slot in slots_by_collaborator 
+            if slot["start"] <= latest_start and slot["end"] > latest_start
+        ]
+        
+        if not valid_slots:
+            return []
+            
+        earliest_end = min(slot["end"] for slot in valid_slots)
+        
+        # Only return a valid range if start is before end
+        if latest_start < earliest_end:
+            return [f"{latest_start}-{earliest_end}"]
+            
+        return []
 
     async def get_team_analytics(self) -> Dict[str, Any]:
         """Get analytics about team composition and project distribution."""
