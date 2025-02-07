@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "artist-manager-agent"
+version = "0.1.0"
+description = "An AI agent that manages independent artists"
+authors = ["Your Name <your.email@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+cdp-agentkit-core = {path = "../cdp-agentkit-core", develop = true}
+langchain = "^0.1.0"
+pydantic = "^2.0.0"
+python-dateutil = "^2.8.2"
+icalendar = "^5.0.0"
+openai = "^1.0.0"
+python-telegram-bot = "^20.0"
+supabase = "^2.0.0"
+spotipy = "^2.23.0"
+tweepy = "^4.14.0"
+instagrapi = "^2.0.0"
+aiohttp = "^3.9.0"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0.0"
+black = "^23.0.0"
+isort = "^5.0.0"
+mypy = "^1.0.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api" 
