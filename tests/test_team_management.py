@@ -140,11 +140,13 @@ async def test_find_common_availability(team_manager):
     collaborator1 = CollaboratorProfile(
         name="John Doe",
         role=CollaboratorRole.PRODUCER,
+        expertise=["Music Production"],
         availability={"monday": ["09:00-17:00"]}
     )
     collaborator2 = CollaboratorProfile(
         name="Jane Smith",
         role=CollaboratorRole.ENGINEER,
+        expertise=["Sound Engineering"],
         availability={"monday": ["10:00-18:00"]}
     )
     
@@ -154,7 +156,12 @@ async def test_find_common_availability(team_manager):
     # Test for Monday
     monday = datetime.strptime("2024-02-12", "%Y-%m-%d")  # A Monday
     common_slots = await team_manager.find_common_availability([id1, id2], monday)
-    assert "10:00-17:00" in common_slots
+    
+    # The common availability should be 10:00-17:00 (intersection of 09:00-17:00 and 10:00-18:00)
+    assert len(common_slots) == 1
+    start_time, end_time = common_slots[0].split("-")
+    assert start_time == "10:00"  # Latest start time
+    assert end_time == "17:00"    # Earliest end time
 
 @pytest.mark.asyncio
 async def test_generate_team_report(team_manager, sample_collaborator, sample_project):

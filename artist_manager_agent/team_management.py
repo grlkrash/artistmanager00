@@ -616,29 +616,62 @@ class TeamManager:
                 
         return availability
 
+    def _time_to_minutes(self, time_str: str) -> int:
+        """Convert time string (HH:MM) to minutes since midnight."""
+        hours, minutes = map(int, time_str.split(":"))
+        return hours * 60 + minutes
+        
+    def _minutes_to_time(self, minutes: int) -> str:
+        """Convert minutes since midnight to time string (HH:MM)."""
+        hours, mins = divmod(minutes, 60)
+        return f"{hours:02d}:{mins:02d}"
+
     async def find_common_availability(
         self,
         collaborator_ids: List[str],
         date: datetime
     ) -> List[str]:
         """Find common available time slots for a group of collaborators."""
-        availabilities = []
         day_name = date.strftime("%A").lower()
+        all_slots = []
         
+        # Get all collaborators' availability for the day
         for collaborator_id in collaborator_ids:
             if collaborator_id in self.collaborators:
                 collaborator = self.collaborators[collaborator_id]
                 if day_name in collaborator.availability:
-                    availabilities.append(set(collaborator.availability[day_name]))
+                    slots = []
+                    for slot in collaborator.availability[day_name]:
+                        start, end = slot.split("-")
+                        # Convert to minutes for easier comparison
+                        start_mins = self._time_to_minutes(start)
+                        end_mins = self._time_to_minutes(end)
+                        slots.append((start_mins, end_mins))
+                    all_slots.append(slots)
                     
-        if not availabilities:
+        if not all_slots:
             return []
             
-        common_slots = availabilities[0]
-        for slots in availabilities[1:]:
-            common_slots &= slots
-            
-        return sorted(list(common_slots))
+        # Find common slots
+        common_slots = all_slots[0]
+        for slots in all_slots[1:]:
+            new_common = []
+            for s1_start, s1_end in common_slots:
+                for s2_start, s2_end in slots:
+                    # Take the later start time and earlier end time
+                    start = max(s1_start, s2_start)
+                    end = min(s1_end, s2_end)
+                    
+                    # Only add if it's a valid time slot (start < end)
+                    if start < end:
+                        new_common.append((start, end))
+            common_slots = new_common
+            if not common_slots:  # No overlapping slots found
+                return []
+                
+        # Convert back to time string format
+        return [f"{self._minutes_to_time(start)}-{self._minutes_to_time(end)}" 
+                for start, end in sorted(common_slots)]
 
     async def get_team_analytics(self) -> Dict[str, Any]:
         """Get analytics about team composition and project distribution."""
