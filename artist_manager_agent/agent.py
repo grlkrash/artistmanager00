@@ -7,6 +7,7 @@ from langchain.schema import SystemMessage, HumanMessage
 
 from .team_management import TeamMember, CollaboratorRole
 from .integrations import ServiceManager, SupabaseIntegration, TelegramIntegration, AIMasteringIntegration
+from .blockchain import BlockchainManager, BlockchainConfig, NFTCollection, Token
 
 class ArtistProfile(BaseModel):
     """Artist profile information."""
@@ -72,7 +73,8 @@ class ArtistManagerAgent:
         model: str = "gpt-4-turbo-preview",
         db_url: Optional[str] = None,
         telegram_token: Optional[str] = None,
-        ai_mastering_key: Optional[str] = None
+        ai_mastering_key: Optional[str] = None,
+        blockchain_config: Optional[BlockchainConfig] = None
     ):
         self.artist = artist_profile
         self.team: List[TeamMember] = []
@@ -80,6 +82,8 @@ class ArtistManagerAgent:
         self.contracts: List[Contract] = []
         self.events: List[Event] = []
         self.finances: List[FinancialRecord] = []
+        self.nft_collections: List[NFTCollection] = []
+        self.tokens: List[Token] = []
         self.llm = ChatOpenAI(
             model=model,
             openai_api_key=openai_api_key,
@@ -87,6 +91,7 @@ class ArtistManagerAgent:
         )
         self.services = ServiceManager()
         self._init_external_services(db_url, telegram_token, ai_mastering_key)
+        self.blockchain = BlockchainManager(blockchain_config) if blockchain_config else None
 
     async def create_artist(self, artist_id: str, name: str, **kwargs) -> ArtistProfile:
         if artist_id in self.artists:
@@ -115,4 +120,57 @@ class ArtistManagerAgent:
         if artist_id in self.artists:
             del self.artists[artist_id]
             return True
-        return False 
+        return False
+
+    # Blockchain-related methods
+    async def deploy_nft_collection(self, name: str, symbol: str, base_uri: str) -> NFTCollection:
+        """Deploy a new NFT collection."""
+        if not self.blockchain:
+            raise ValueError("Blockchain features not initialized")
+        collection = await self.blockchain.deploy_nft_collection(name, symbol, base_uri)
+        self.nft_collections.append(collection)
+        return collection
+    
+    async def mint_nft(self, collection_address: str, destination: str) -> str:
+        """Mint an NFT from a collection."""
+        if not self.blockchain:
+            raise ValueError("Blockchain features not initialized")
+        return await self.blockchain.mint_nft(collection_address, destination)
+    
+    async def deploy_token(self, name: str, symbol: str, total_supply: str) -> Token:
+        """Deploy a new token."""
+        if not self.blockchain:
+            raise ValueError("Blockchain features not initialized")
+        token = await self.blockchain.deploy_token(name, symbol, total_supply)
+        self.tokens.append(token)
+        return token
+    
+    async def get_balance(self, asset_id: str = "eth") -> Dict[str, str]:
+        """Get wallet balances."""
+        if not self.blockchain:
+            raise ValueError("Blockchain features not initialized")
+        return await self.blockchain.get_balance(asset_id)
+    
+    async def transfer_assets(self, amount: str, asset_id: str, destination: str, gasless: bool = False) -> str:
+        """Transfer assets."""
+        if not self.blockchain:
+            raise ValueError("Blockchain features not initialized")
+        return await self.blockchain.transfer(amount, asset_id, destination, gasless)
+    
+    async def wrap_eth(self, amount: str) -> str:
+        """Wrap ETH to WETH."""
+        if not self.blockchain:
+            raise ValueError("Blockchain features not initialized")
+        return await self.blockchain.wrap_eth(amount)
+
+    async def request_faucet_funds(self, asset_id: Optional[str] = None) -> str:
+        """Request test tokens from faucet."""
+        if not self.blockchain:
+            raise ValueError("Blockchain features not initialized")
+        return await self.blockchain.request_faucet_funds(asset_id)
+    
+    async def get_wallet_details(self) -> Dict[str, str]:
+        """Get wallet details."""
+        if not self.blockchain:
+            raise ValueError("Blockchain features not initialized")
+        return await self.blockchain.get_wallet_details() 

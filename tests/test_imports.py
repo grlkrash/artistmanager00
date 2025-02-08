@@ -1,7 +1,17 @@
 def test_imports():
     """Test that we can import the required modules."""
-    from artist_manager_agent.team_management import PaymentMethod, TeamManager, CollaboratorRole
+    from artist_manager_agent.agent import (
+        ArtistManagerAgent,
+        ArtistProfile,
+        Contract,
+        Event,
+        FinancialRecord,
+        Task
+    )
     
-    assert PaymentMethod is not None
-    assert TeamManager is not None
-    assert CollaboratorRole is not None 
+    assert ArtistManagerAgent is not None
+    assert ArtistProfile is not None
+    assert Contract is not None
+    assert Event is not None
+    assert FinancialRecord is not None
+    assert Task is not None 

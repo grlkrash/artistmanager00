@@ -3,19 +3,14 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from telegram import Bot, Update, Message, Chat, User
 from telegram.ext import ContextTypes
-from artist_manager_agent.team_management import (
-    TeamManager,
-    CalendarIntegration,
-    CalendarProvider,
-    AvailabilityPreference,
-    Meeting,
-    CollaboratorProfile,
-    CollaboratorRole
+from artist_manager_agent.agent import (
+    ArtistManagerAgent,
+    Event
 )
 
 @pytest.fixture
-def team_manager():
-    return TeamManager()
+def agent():
+    return ArtistManagerAgent()
 
 @pytest.fixture
 def mock_bot():
@@ -46,149 +41,101 @@ def mock_context():
     return context
 
 @pytest.fixture
-def sample_collaborators(team_manager):
-    async def _create_collaborators():
-        collaborator1 = CollaboratorProfile(
-            name="John Doe",
-            role=CollaboratorRole.PRODUCER,
-            expertise=["Music Production"],
-            availability={
-                "monday": ["09:00-17:00"],
-                "tuesday": ["10:00-18:00"]
-            }
-        )
-        collaborator2 = CollaboratorProfile(
-            name="Jane Smith",
-            role=CollaboratorRole.ENGINEER,
-            expertise=["Sound Engineering"],
-            availability={
-                "monday": ["10:00-18:00"],
-                "tuesday": ["09:00-17:00"]
-            }
-        )
-        
-        id1 = await team_manager.add_collaborator(collaborator1)
-        id2 = await team_manager.add_collaborator(collaborator2)
-        return [id1, id2]
-    
-    return _create_collaborators
+def sample_event():
+    return Event(
+        event_id="event_1",
+        title="Team Meeting",
+        description="Weekly team sync",
+        start_time=datetime.now(),
+        end_time=datetime.now() + timedelta(hours=1),
+        location="Virtual",
+        attendees=["John Doe", "Jane Smith"],
+        status="scheduled",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
 
 @pytest.mark.asyncio
-async def test_add_calendar_integration(team_manager, sample_collaborators):
-    """Test adding calendar integration."""
-    collaborator_ids = await sample_collaborators()
-    
-    integration_id = await team_manager.add_calendar_integration(
-        collaborator_id=collaborator_ids[0],
-        provider=CalendarProvider.GOOGLE,
-        credentials={"token": "test_token"},
-        preferences={
-            "auto_sync": True,
-            "availability_preference": AvailabilityPreference.AUTOMATIC
-        }
-    )
-    
-    assert integration_id in team_manager.calendar_integrations
-    integration = team_manager.calendar_integrations[integration_id]
-    assert integration.collaborator_id == collaborator_ids[0]
-    assert integration.provider == CalendarProvider.GOOGLE
-    assert integration.preferences["auto_sync"] is True
+async def test_add_event(agent, sample_event):
+    """Test adding an event."""
+    await agent.add_event(sample_event)
+    events = await agent.get_events()
+    assert len(events) == 1
+    assert events[0].event_id == "event_1"
+    assert events[0].title == "Team Meeting"
+    assert events[0].status == "scheduled"
 
 @pytest.mark.asyncio
-async def test_schedule_meeting(team_manager, sample_collaborators):
-    """Test scheduling a meeting."""
-    collaborator_ids = await sample_collaborators()
-    
-    # Add calendar integrations
-    for collab_id in collaborator_ids:
-        await team_manager.add_calendar_integration(
-            collaborator_id=collab_id,
-            provider=CalendarProvider.GOOGLE,
-            credentials={"token": "test_token"}
-        )
-    
-    # Schedule a meeting for Monday at 10:00
-    monday = datetime.strptime("2024-02-12 10:00", "%Y-%m-%d %H:%M")
-    meeting = await team_manager.schedule_meeting(
-        title="Test Meeting",
-        attendees=collaborator_ids,
-        duration_minutes=60,
-        earliest_start=monday,
-        latest_start=monday.replace(hour=16),
-        meeting_type="project",
-        description="Test project meeting"
-    )
-    
-    assert meeting is not None
-    assert meeting.title == "Test Meeting"
-    assert meeting.status == "scheduled"
-    assert set(meeting.attendees) == set(collaborator_ids)
-    assert (meeting.end_time - meeting.start_time).total_seconds() / 60 == 60
-    assert meeting.start_time.hour == 10  # Should start at 10:00
+async def test_update_event(agent, sample_event):
+    """Test updating an event."""
+    await agent.add_event(sample_event)
+    updated_event = sample_event.copy()
+    updated_event.status = "completed"
+    await agent.update_event(updated_event)
+    events = await agent.get_events()
+    assert events[0].status == "completed"
 
 @pytest.mark.asyncio
-async def test_cancel_meeting(team_manager, sample_collaborators):
-    """Test canceling a meeting."""
-    collaborator_ids = await sample_collaborators()
-    
-    # Schedule a meeting first
-    monday = datetime.strptime("2024-02-12 10:00", "%Y-%m-%d %H:%M")
-    meeting = await team_manager.schedule_meeting(
-        title="Test Meeting",
-        attendees=collaborator_ids,
-        duration_minutes=60,
-        earliest_start=monday,
-        latest_start=monday.replace(hour=16),
-        meeting_type="project"
-    )
-    
-    assert meeting is not None
-    
-    # Cancel the meeting
-    success = await team_manager.cancel_meeting(meeting.id)
-    assert success is True
-    
-    # Verify meeting is cancelled
-    cancelled_meeting = team_manager.meetings[meeting.id]
-    assert cancelled_meeting.status == "cancelled"
+async def test_cancel_event(agent, sample_event):
+    """Test canceling an event."""
+    await agent.add_event(sample_event)
+    cancelled_event = sample_event.copy()
+    cancelled_event.status = "cancelled"
+    await agent.update_event(cancelled_event)
+    events = await agent.get_events()
+    assert events[0].status == "cancelled"
 
 @pytest.mark.asyncio
-async def test_get_upcoming_meetings(team_manager, sample_collaborators):
-    """Test getting upcoming meetings."""
-    collaborator_ids = await sample_collaborators()
-    
-    # Schedule multiple meetings
-    monday = datetime.strptime("2024-02-12 10:00", "%Y-%m-%d %H:%M")
-    meeting1 = await team_manager.schedule_meeting(
-        title="Meeting 1",
-        attendees=[collaborator_ids[0]],
-        duration_minutes=60,
-        earliest_start=monday,
-        latest_start=monday.replace(hour=16),
-        meeting_type="project"
+async def test_get_upcoming_events(agent):
+    """Test getting upcoming events."""
+    # Create events for different days
+    event1 = Event(
+        event_id="event_1",
+        title="Today's Meeting",
+        description="Team sync",
+        start_time=datetime.now() + timedelta(hours=1),
+        end_time=datetime.now() + timedelta(hours=2),
+        location="Virtual",
+        attendees=["John Doe"],
+        status="scheduled",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
     
-    assert meeting1 is not None
-    
-    tuesday = monday + timedelta(days=1)
-    meeting2 = await team_manager.schedule_meeting(
-        title="Meeting 2",
-        attendees=collaborator_ids,
-        duration_minutes=60,
-        earliest_start=tuesday,
-        latest_start=tuesday.replace(hour=16),
-        meeting_type="project"
+    event2 = Event(
+        event_id="event_2",
+        title="Tomorrow's Meeting",
+        description="Project review",
+        start_time=datetime.now() + timedelta(days=1),
+        end_time=datetime.now() + timedelta(days=1, hours=1),
+        location="Virtual",
+        attendees=["John Doe", "Jane Smith"],
+        status="scheduled",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
     
-    assert meeting2 is not None
+    await agent.add_event(event1)
+    await agent.add_event(event2)
     
-    # Get upcoming meetings for first collaborator
-    upcoming = await team_manager.get_upcoming_meetings(collaborator_ids[0])
+    # Get upcoming events
+    upcoming = await agent.get_upcoming_events()
     assert len(upcoming) == 2
-    assert meeting1 in upcoming
-    assert meeting2 in upcoming
+    assert any(e.event_id == "event_1" for e in upcoming)
+    assert any(e.event_id == "event_2" for e in upcoming)
     
-    # Get upcoming meetings for second collaborator
-    upcoming = await team_manager.get_upcoming_meetings(collaborator_ids[1])
-    assert len(upcoming) == 1
-    assert meeting2 in upcoming 
+    # Get upcoming events for specific attendee
+    john_events = await agent.get_upcoming_events(attendee="John Doe")
+    assert len(john_events) == 2
+    
+    jane_events = await agent.get_upcoming_events(attendee="Jane Smith")
+    assert len(jane_events) == 1
+    assert jane_events[0].event_id == "event_2"
+
+@pytest.mark.asyncio
+async def test_get_event_report(agent, sample_event):
+    """Test generating an event report."""
+    await agent.add_event(sample_event)
+    report = await agent.get_event_report()
+    assert report["total_events"] == 1
+    assert report["by_status"]["scheduled"] == 1 

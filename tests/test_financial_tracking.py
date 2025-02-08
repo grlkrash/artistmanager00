@@ -1,116 +1,101 @@
 import pytest
 from datetime import datetime, timedelta
-from artist_manager_agent.team_management import (
-    PaymentManager,
-    FinancialAccount,
-    EnhancedTransaction,
-    BudgetTracking,
-    TransactionCategory,
-    TransactionSource
+from artist_manager_agent.agent import (
+    ArtistManagerAgent,
+    FinancialRecord
 )
 
 @pytest.fixture
-def payment_manager():
-    return PaymentManager(
-        stripe_key="test_stripe_key",
-        paypal_client_id="test_client_id",
-        paypal_secret="test_secret"
-    )
+def agent():
+    return ArtistManagerAgent()
 
 @pytest.fixture
-def sample_account():
-    return FinancialAccount(
-        name="Test Account",
-        type="payment_platform",
-        provider="stripe"
-    )
-
-@pytest.fixture
-def sample_transaction():
-    return EnhancedTransaction(
-        date=datetime.now(),
+def sample_income():
+    return FinancialRecord(
+        record_id="finance_1",
+        type="income",
         amount=1000.0,
-        category=TransactionCategory.INCOME_STREAMING,
-        description="Test streaming revenue",
-        source=TransactionSource.STRIPE
-    )
-
-@pytest.fixture
-def sample_budget():
-    return BudgetTracking(
-        project_id="test_project",
-        period_start=datetime.now(),
-        period_end=datetime.now() + timedelta(days=30),
-        categories={
-            TransactionCategory.EXPENSE_STUDIO: 2000.0,
-            TransactionCategory.EXPENSE_MARKETING: 1000.0
-        }
-    )
-
-@pytest.mark.asyncio
-async def test_add_financial_account(payment_manager, sample_account):
-    """Test adding a financial account."""
-    account_id = await payment_manager.add_financial_account(sample_account)
-    assert account_id in payment_manager.accounts
-    assert payment_manager.accounts[account_id].name == "Test Account"
-
-@pytest.mark.asyncio
-async def test_record_transaction(payment_manager, sample_transaction):
-    """Test recording a transaction."""
-    transaction_id = await payment_manager.record_transaction(sample_transaction)
-    assert transaction_id in payment_manager.transactions
-    assert payment_manager.transactions[transaction_id].amount == 1000.0
-
-@pytest.mark.asyncio
-async def test_cash_flow_analysis(payment_manager):
-    """Test cash flow analysis."""
-    # Add income transaction
-    income = EnhancedTransaction(
-        date=datetime.now(),
-        amount=1000.0,
-        category=TransactionCategory.INCOME_STREAMING,
         description="Streaming revenue",
-        source=TransactionSource.STRIPE
-    )
-    await payment_manager.record_transaction(income)
-    
-    # Add expense transaction
-    expense = EnhancedTransaction(
         date=datetime.now(),
-        amount=500.0,
-        category=TransactionCategory.EXPENSE_STUDIO,
-        description="Studio time",
-        source=TransactionSource.MANUAL
+        category="streaming_revenue",
+        status="completed",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
-    await payment_manager.record_transaction(expense)
+
+@pytest.fixture
+def sample_expense():
+    return FinancialRecord(
+        record_id="finance_2",
+        type="expense",
+        amount=500.0,
+        description="Studio time",
+        date=datetime.now(),
+        category="studio_expenses",
+        status="completed",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+
+@pytest.mark.asyncio
+async def test_add_financial_record(agent, sample_income):
+    """Test adding a financial record."""
+    await agent.add_financial_record(sample_income)
+    records = await agent.get_financial_records()
+    assert len(records) == 1
+    assert records[0].record_id == "finance_1"
+    assert records[0].amount == 1000.0
+
+@pytest.mark.asyncio
+async def test_update_financial_record(agent, sample_income):
+    """Test updating a financial record."""
+    await agent.add_financial_record(sample_income)
+    updated_record = sample_income.copy()
+    updated_record.status = "pending"
+    await agent.update_financial_record(updated_record)
+    records = await agent.get_financial_records()
+    assert records[0].status == "pending"
+
+@pytest.mark.asyncio
+async def test_cash_flow_analysis(agent, sample_income, sample_expense):
+    """Test cash flow analysis."""
+    # Add income and expense records
+    await agent.add_financial_record(sample_income)
+    await agent.add_financial_record(sample_expense)
     
     start_date = datetime.now() - timedelta(days=1)
     end_date = datetime.now() + timedelta(days=1)
     
-    analysis = await payment_manager.get_cash_flow_analysis(start_date, end_date)
+    analysis = await agent.get_cash_flow_analysis(start_date, end_date)
     assert analysis["net_cash_flow"] == 500.0  # 1000 income - 500 expense
-    assert TransactionCategory.INCOME_STREAMING.value in analysis["income"]
-    assert TransactionCategory.EXPENSE_STUDIO.value in analysis["expenses"]
-    assert analysis["income"][TransactionCategory.INCOME_STREAMING.value] == 1000.0
-    assert analysis["expenses"][TransactionCategory.EXPENSE_STUDIO.value] == 500.0
+    assert analysis["income"]["streaming_revenue"] == 1000.0
+    assert analysis["expenses"]["studio_expenses"] == 500.0
 
 @pytest.mark.asyncio
-async def test_budget_variance(payment_manager, sample_budget):
-    """Test budget variance analysis."""
-    # Add budget
-    payment_manager.budgets[sample_budget.project_id] = sample_budget
+async def test_get_financial_report(agent, sample_income, sample_expense):
+    """Test generating a financial report."""
+    await agent.add_financial_record(sample_income)
+    await agent.add_financial_record(sample_expense)
     
-    # Add some transactions
-    transaction = EnhancedTransaction(
-        date=datetime.now(),
-        amount=1500.0,
-        category=TransactionCategory.EXPENSE_STUDIO,
-        description="Studio session",
-        source=TransactionSource.MANUAL,
-        project_id=sample_budget.project_id
-    )
-    await payment_manager.record_transaction(transaction)
+    start_date = datetime.now() - timedelta(days=1)
+    end_date = datetime.now() + timedelta(days=1)
     
-    variance = await payment_manager.get_budget_variance(sample_budget.project_id)
-    assert variance["by_category"][TransactionCategory.EXPENSE_STUDIO.value] == 500.0  # 2000 budget - 1500 spent
-    assert variance["percent_used"][TransactionCategory.EXPENSE_STUDIO.value] == 75.0  # 1500/2000 * 100 
+    report = await agent.get_financial_report(start_date, end_date)
+    assert report["total_income"] == 1000.0
+    assert report["total_expenses"] == 500.0
+    assert report["net_income"] == 500.0
+    assert report["categories"]["streaming_revenue"] == 1000.0
+    assert report["categories"]["studio_expenses"] == 500.0
+
+@pytest.mark.asyncio
+async def test_get_monthly_summary(agent, sample_income, sample_expense):
+    """Test generating a monthly financial summary."""
+    await agent.add_financial_record(sample_income)
+    await agent.add_financial_record(sample_expense)
+    
+    current_month = datetime.now().replace(day=1)
+    summary = await agent.get_monthly_summary(current_month)
+    assert summary["month"] == current_month.strftime("%Y-%m")
+    assert summary["total_income"] == 1000.0
+    assert summary["total_expenses"] == 500.0
+    assert summary["net_income"] == 500.0 

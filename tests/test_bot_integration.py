@@ -33,26 +33,45 @@ def mock_context():
 @pytest.fixture
 def artist_profile():
     return ArtistProfile(
-        artist_id="test_artist_1",
         name="Test Artist",
-        email="test@artist.com",
-        phone="+1234567890",
-        genre=["Pop"],
+        genre="Pop",
         career_stage="emerging",
-        goals=["Release album"],
-        strengths=["Vocals"],
-        areas_for_improvement=["Marketing"],
-        achievements=[],
+        goals=[
+            "Release album",
+            "Grow social media following",
+            "Book live shows"
+        ],
+        strengths=[
+            "Vocals",
+            "Songwriting",
+            "Stage presence"
+        ],
+        areas_for_improvement=[
+            "Marketing",
+            "Time management",
+            "Networking"
+        ],
+        achievements=[
+            "Released debut EP",
+            "100K streams on Spotify"
+        ],
         social_media={
             "instagram": "@test_artist",
-            "twitter": "@test_artist"
+            "twitter": "@test_artist",
+            "tiktok": "@test_artist"
         },
         streaming_profiles={
             "spotify": "spotify:artist:test",
-            "apple_music": "artist/test"
+            "apple_music": "artist/test",
+            "soundcloud": "test_artist"
         },
         health_notes=[],
-        brand_guidelines="Test artist brand guidelines",
+        brand_guidelines={
+            "colors": ["#FF0000", "#00FF00"],
+            "fonts": ["Helvetica", "Arial"],
+            "tone": "Authentic and energetic",
+            "values": ["Creativity", "Authenticity", "Connection"]
+        },
         created_at=datetime.now(),
         updated_at=datetime.now()
     )

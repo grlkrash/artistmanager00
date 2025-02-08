@@ -3,8 +3,10 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from telegram import Bot, Update, Message, Chat, User
 from telegram.ext import ContextTypes
-from artist_manager_agent.main import ArtistManagerBot
-from artist_manager_agent.team_management import PaymentRequest, PaymentMethod, PaymentStatus
+from artist_manager_agent.agent import (
+    ArtistManagerAgent,
+    FinancialRecord
+)
 
 @pytest.fixture
 def mock_bot():
@@ -35,24 +37,162 @@ def mock_context():
     return context
 
 @pytest.fixture
-def bot(mock_bot):
-    bot = ArtistManagerBot()  # Initialize without token
-    bot.bot = mock_bot  # Set the mock bot
-    return bot
+def agent():
+    return ArtistManagerAgent()
+
+@pytest.fixture
+def sample_payment():
+    return FinancialRecord(
+        record_id="payment_1",
+        type="income",
+        amount=100.0,
+        description="Test payment",
+        date=datetime.now(),
+        category="service_fee",
+        status="pending",
+        payment_method="crypto",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
 
 @pytest.mark.asyncio
-async def test_setup_payment(bot, mock_update, mock_context):
-    """Test setting up payment method."""
-    await bot.setup_payment(mock_update, mock_context)
-    
-    # Get the last call arguments
-    args, kwargs = mock_update.message.reply_text.call_args
-    
-    assert "Choose your preferred payment method:" in args[0]
-    assert "reply_markup" in kwargs
-    assert kwargs["reply_markup"] is not None
+async def test_add_payment(agent, sample_payment):
+    """Test adding a payment record."""
+    await agent.add_financial_record(sample_payment)
+    records = await agent.get_financial_records()
+    assert len(records) == 1
+    assert records[0].record_id == "payment_1"
+    assert records[0].amount == 100.0
+    assert records[0].status == "pending"
 
 @pytest.mark.asyncio
+async def test_update_payment_status(agent, sample_payment):
+    """Test updating payment status."""
+    await agent.add_financial_record(sample_payment)
+    updated_payment = sample_payment.copy()
+    updated_payment.status = "completed"
+    await agent.update_financial_record(updated_payment)
+    records = await agent.get_financial_records()
+    assert records[0].status == "completed"
+
+@pytest.mark.asyncio
+async def test_get_pending_payments(agent):
+    """Test getting pending payments."""
+    # Add pending payment
+    pending_payment = FinancialRecord(
+        record_id="payment_1",
+        type="income",
+        amount=100.0,
+        description="Pending payment",
+        date=datetime.now(),
+        category="service_fee",
+        status="pending",
+        payment_method="crypto",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+    await agent.add_financial_record(pending_payment)
+    
+    # Add completed payment
+    completed_payment = FinancialRecord(
+        record_id="payment_2",
+        type="income",
+        amount=200.0,
+        description="Completed payment",
+        date=datetime.now(),
+        category="service_fee",
+        status="completed",
+        payment_method="crypto",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+    await agent.add_financial_record(completed_payment)
+    
+    # Get pending payments
+    pending = await agent.get_pending_payments()
+    assert len(pending) == 1
+    assert pending[0].record_id == "payment_1"
+    assert pending[0].status == "pending"
+
+@pytest.mark.asyncio
+async def test_get_payment_history(agent):
+    """Test getting payment history."""
+    # Add multiple payments
+    payment1 = FinancialRecord(
+        record_id="payment_1",
+        type="income",
+        amount=100.0,
+        description="First payment",
+        date=datetime.now() - timedelta(days=1),
+        category="service_fee",
+        status="completed",
+        payment_method="crypto",
+        created_at=datetime.now() - timedelta(days=1),
+        updated_at=datetime.now() - timedelta(days=1)
+    )
+    await agent.add_financial_record(payment1)
+    
+    payment2 = FinancialRecord(
+        record_id="payment_2",
+        type="income",
+        amount=200.0,
+        description="Second payment",
+        date=datetime.now(),
+        category="service_fee",
+        status="completed",
+        payment_method="crypto",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+    await agent.add_financial_record(payment2)
+    
+    # Get payment history
+    history = await agent.get_payment_history()
+    assert len(history) == 2
+    assert history[0].record_id == "payment_2"  # Most recent first
+    assert history[1].record_id == "payment_1"
+
+@pytest.mark.asyncio
+async def test_get_payment_summary(agent):
+    """Test getting payment summary."""
+    # Add income payment
+    income = FinancialRecord(
+        record_id="payment_1",
+        type="income",
+        amount=1000.0,
+        description="Service fee",
+        date=datetime.now(),
+        category="service_fee",
+        status="completed",
+        payment_method="crypto",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+    await agent.add_financial_record(income)
+    
+    # Add expense payment
+    expense = FinancialRecord(
+        record_id="payment_2",
+        type="expense",
+        amount=500.0,
+        description="Studio time",
+        date=datetime.now(),
+        category="studio_expenses",
+        status="completed",
+        payment_method="bank_transfer",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+    await agent.add_financial_record(expense)
+    
+    # Get payment summary
+    summary = await agent.get_payment_summary()
+    assert summary["total_income"] == 1000.0
+    assert summary["total_expenses"] == 500.0
+    assert summary["net_income"] == 500.0
+    assert summary["by_category"]["service_fee"] == 1000.0
+    assert summary["by_category"]["studio_expenses"] == -500.0
+    assert summary["by_payment_method"]["crypto"] == 1000.0
 async def test_request_payment_success(bot, mock_update, mock_context):
     """Test successful payment request."""
     mock_context.args = ["100", "USD", "Test payment"]

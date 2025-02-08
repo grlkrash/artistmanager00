@@ -1,296 +1,166 @@
 import pytest
 from datetime import datetime, timedelta
-from artist_manager_agent.team_management import (
-    TeamManager,
-    CollaboratorProfile,
-    CollaboratorRole,
-    Project,
-    FinancialTransaction,
-    BudgetCategory,
-    BudgetAllocation
+from artist_manager_agent.agent import (
+    ArtistManagerAgent,
+    Contract,
+    Event,
+    FinancialRecord,
+    Task
 )
 
 @pytest.fixture
-def team_manager():
-    return TeamManager()
+def agent():
+    return ArtistManagerAgent()
 
 @pytest.fixture
-def sample_collaborator():
-    return CollaboratorProfile(
-        name="John Doe",
-        role=CollaboratorRole.PRODUCER,
-        expertise=["Music Production", "Mixing"],
-        rate=100.0,
-        currency="USD",
-        location="New York",
-        availability={
-            "monday": ["09:00-17:00"],
-            "wednesday": ["09:00-17:00"],
-            "friday": ["09:00-17:00"]
-        }
-    )
-
-@pytest.fixture
-def sample_project():
-    return Project(
-        name="Album Production",
-        description="Produce debut album",
+def sample_contract():
+    return Contract(
+        contract_id="contract_1",
+        title="Producer Agreement",
+        parties=["Artist", "John Doe"],
+        terms="Music production services for upcoming album",
         start_date=datetime.now(),
         end_date=datetime.now() + timedelta(days=90),
-        budget=10000.0,
-        deliverables=["10 tracks", "Album artwork", "Credits document"]
+        value=10000.0,
+        status="active",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
 
 @pytest.fixture
-def sample_transaction():
-    return FinancialTransaction(
+def sample_task():
+    return Task(
+        task_id="task_1",
+        title="Album Production",
+        description="Produce debut album",
+        assigned_to="John Doe",
+        due_date=datetime.now() + timedelta(days=90),
+        priority="high",
+        status="in_progress",
+        dependencies=["Track recording", "Mixing", "Mastering"],
+        notes=["Focus on maintaining consistent sound"],
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+
+@pytest.fixture
+def sample_event():
+    return Event(
+        event_id="event_1",
+        title="Production Meeting",
+        description="Weekly production status meeting",
+        start_time=datetime.now(),
+        end_time=datetime.now() + timedelta(hours=1),
+        location="Studio A",
+        attendees=["Artist", "John Doe"],
+        status="scheduled",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+
+@pytest.fixture
+def sample_financial_record():
+    return FinancialRecord(
+        record_id="finance_1",
+        type="expense",
         amount=1000.0,
-        category=BudgetCategory.PRODUCTION,
-        description="Studio time",
-        transaction_type="expense",
-        tax_category="business_expense"
-    )
-
-@pytest.fixture
-def sample_budget_allocation():
-    return BudgetAllocation(
-        category=BudgetCategory.PRODUCTION,
-        amount=5000.0,
-        period_start=datetime.now(),
-        period_end=datetime.now() + timedelta(days=90)
+        description="Studio time payment",
+        date=datetime.now(),
+        category="studio_expenses",
+        status="completed",
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
 
 @pytest.mark.asyncio
-async def test_add_collaborator(team_manager, sample_collaborator):
-    """Test adding a collaborator to the team."""
-    collaborator_id = await team_manager.add_collaborator(sample_collaborator)
-    assert collaborator_id is not None
-    assert collaborator_id in team_manager.collaborators
-    assert team_manager.collaborators[collaborator_id].name == "John Doe"
+async def test_add_contract(agent, sample_contract):
+    """Test adding a contract."""
+    await agent.add_contract(sample_contract)
+    contracts = await agent.get_contracts()
+    assert len(contracts) == 1
+    assert contracts[0].contract_id == "contract_1"
+    assert contracts[0].title == "Producer Agreement"
 
 @pytest.mark.asyncio
-async def test_update_collaborator(team_manager, sample_collaborator):
-    """Test updating collaborator information."""
-    collaborator_id = await team_manager.add_collaborator(sample_collaborator)
-    updates = {"rate": 150.0, "location": "Los Angeles"}
-    updated = await team_manager.update_collaborator(collaborator_id, updates)
-    assert updated is not None
-    assert updated.rate == 150.0
-    assert updated.location == "Los Angeles"
+async def test_update_contract(agent, sample_contract):
+    """Test updating contract information."""
+    await agent.add_contract(sample_contract)
+    updated_contract = sample_contract.copy()
+    updated_contract.status = "completed"
+    await agent.update_contract(updated_contract)
+    contracts = await agent.get_contracts()
+    assert contracts[0].status == "completed"
 
 @pytest.mark.asyncio
-async def test_create_project(team_manager, sample_project):
-    """Test creating a new project."""
-    project_id = await team_manager.create_project(sample_project)
-    assert project_id is not None
-    assert project_id in team_manager.projects
-    assert team_manager.projects[project_id].name == "Album Production"
+async def test_add_task(agent, sample_task):
+    """Test adding a task."""
+    await agent.add_task(sample_task)
+    tasks = await agent.get_tasks()
+    assert len(tasks) == 1
+    assert tasks[0].task_id == "task_1"
+    assert tasks[0].title == "Album Production"
 
 @pytest.mark.asyncio
-async def test_assign_to_project(team_manager, sample_collaborator, sample_project):
-    """Test assigning a collaborator to a project."""
-    collaborator_id = await team_manager.add_collaborator(sample_collaborator)
-    project_id = await team_manager.create_project(sample_project)
-    
-    success = await team_manager.assign_to_project(project_id, collaborator_id)
-    assert success is True
-    assert collaborator_id in team_manager.projects[project_id].team_members
+async def test_update_task(agent, sample_task):
+    """Test updating task status."""
+    await agent.add_task(sample_task)
+    updated_task = sample_task.copy()
+    updated_task.status = "completed"
+    await agent.update_task(updated_task)
+    tasks = await agent.get_tasks()
+    assert tasks[0].status == "completed"
 
 @pytest.mark.asyncio
-async def test_get_team_analytics(team_manager, sample_collaborator, sample_project):
-    """Test team analytics generation."""
-    await team_manager.add_collaborator(sample_collaborator)
-    await team_manager.create_project(sample_project)
-    
-    analytics = await team_manager.get_team_analytics()
-    assert analytics["total_collaborators"] == 1
-    assert analytics["total_projects"] == 1
-    assert "producer" in analytics["role_distribution"]
-    assert analytics["role_distribution"]["producer"] == 1
+async def test_add_event(agent, sample_event):
+    """Test adding an event."""
+    await agent.add_event(sample_event)
+    events = await agent.get_events()
+    assert len(events) == 1
+    assert events[0].event_id == "event_1"
+    assert events[0].title == "Production Meeting"
 
 @pytest.mark.asyncio
-async def test_get_project_analytics(team_manager, sample_collaborator, sample_project):
-    """Test project analytics generation."""
-    collaborator_id = await team_manager.add_collaborator(sample_collaborator)
-    project_id = await team_manager.create_project(sample_project)
-    await team_manager.assign_to_project(project_id, collaborator_id)
-    
-    analytics = await team_manager.get_project_analytics(project_id)
-    assert analytics["project_name"] == "Album Production"
-    assert analytics["team_size"] == 1
-    assert "producer" in analytics["role_distribution"]
-    assert analytics["role_distribution"]["producer"] == 1
+async def test_update_event(agent, sample_event):
+    """Test updating event status."""
+    await agent.add_event(sample_event)
+    updated_event = sample_event.copy()
+    updated_event.status = "completed"
+    await agent.update_event(updated_event)
+    events = await agent.get_events()
+    assert events[0].status == "completed"
 
 @pytest.mark.asyncio
-async def test_get_collaborator_performance(team_manager, sample_collaborator, sample_project):
-    """Test collaborator performance metrics."""
-    collaborator_id = await team_manager.add_collaborator(sample_collaborator)
-    project_id = await team_manager.create_project(sample_project)
-    await team_manager.assign_to_project(project_id, collaborator_id)
-    
-    performance = await team_manager.get_collaborator_performance(collaborator_id)
-    assert performance["name"] == "John Doe"
-    assert performance["role"] == "producer"
-    assert performance["projects"]["total"] == 1
-    assert performance["projects"]["active"] == 1
+async def test_add_financial_record(agent, sample_financial_record):
+    """Test adding a financial record."""
+    await agent.add_financial_record(sample_financial_record)
+    records = await agent.get_financial_records()
+    assert len(records) == 1
+    assert records[0].record_id == "finance_1"
+    assert records[0].amount == 1000.0
 
 @pytest.mark.asyncio
-async def test_find_common_availability(team_manager):
-    """Test finding common availability slots."""
-    collaborator1 = CollaboratorProfile(
-        name="John Doe",
-        role=CollaboratorRole.PRODUCER,
-        expertise=["Music Production"],
-        availability={"monday": ["09:00-17:00"]}
-    )
-    collaborator2 = CollaboratorProfile(
-        name="Jane Smith",
-        role=CollaboratorRole.ENGINEER,
-        expertise=["Sound Engineering"],
-        availability={"monday": ["10:00-18:00"]}
-    )
-    
-    id1 = await team_manager.add_collaborator(collaborator1)
-    id2 = await team_manager.add_collaborator(collaborator2)
-    
-    # Test for Monday
-    monday = datetime.strptime("2024-02-12", "%Y-%m-%d")  # A Monday
-    common_slots = await team_manager.find_common_availability([id1, id2], monday)
-    
-    # The common availability should be 10:00-17:00 (intersection of 09:00-17:00 and 10:00-18:00)
-    assert len(common_slots) == 1
-    start_time, end_time = common_slots[0].split("-")
-    assert start_time == "10:00"  # Latest start time
-    assert end_time == "17:00"    # Earliest end time
-
-@pytest.mark.asyncio
-async def test_generate_team_report(team_manager, sample_collaborator, sample_project):
-    """Test team report generation."""
-    await team_manager.add_collaborator(sample_collaborator)
-    await team_manager.create_project(sample_project)
-    
-    report = await team_manager.generate_team_report()
-    assert "Team Status Report" in report
-    assert "Total Collaborators: 1" in report
-    assert "Total Projects: 1" in report
-    assert "producer" in report.lower()
-
-@pytest.mark.asyncio
-async def test_remove_collaborator(team_manager, sample_collaborator, sample_project):
-    """Test removing a collaborator."""
-    collaborator_id = await team_manager.add_collaborator(sample_collaborator)
-    project_id = await team_manager.create_project(sample_project)
-    await team_manager.assign_to_project(project_id, collaborator_id)
-    
-    success = await team_manager.remove_collaborator(collaborator_id)
-    assert success is True
-    assert collaborator_id not in team_manager.collaborators
-    assert collaborator_id not in team_manager.projects[project_id].team_members
-
-@pytest.mark.asyncio
-async def test_get_project_team(team_manager, sample_collaborator, sample_project):
-    """Test getting project team members."""
-    collaborator_id = await team_manager.add_collaborator(sample_collaborator)
-    project_id = await team_manager.create_project(sample_project)
-    await team_manager.assign_to_project(project_id, collaborator_id)
-    
-    team = await team_manager.get_project_team(project_id)
-    assert len(team) == 1
-    assert team[0].name == "John Doe"
-    assert team[0].role == CollaboratorRole.PRODUCER 
-
-@pytest.mark.asyncio
-async def test_record_transaction(team_manager, sample_transaction):
-    """Test recording a financial transaction."""
-    transaction_id = await team_manager.record_transaction(sample_transaction)
-    assert transaction_id is not None
-    assert transaction_id in team_manager.transactions
-    assert team_manager.transactions[transaction_id].amount == 1000.0
-    assert team_manager.transactions[transaction_id].category == BudgetCategory.PRODUCTION
-
-@pytest.mark.asyncio
-async def test_set_project_budget(team_manager, sample_project, sample_budget_allocation):
-    """Test setting project budget allocations."""
-    project_id = await team_manager.create_project(sample_project)
-    success = await team_manager.set_project_budget(project_id, [sample_budget_allocation])
-    assert success is True
-    assert project_id in team_manager.budget_allocations
-    assert team_manager.budget_allocations[project_id][0].amount == 5000.0
-    assert team_manager.projects[project_id].budget == 5000.0
-
-@pytest.mark.asyncio
-async def test_get_financial_report(team_manager, sample_transaction, sample_project):
+async def test_get_financial_report(agent, sample_financial_record):
     """Test generating a financial report."""
-    # Add transaction and project
-    project_id = await team_manager.create_project(sample_project)
-    sample_transaction.project_id = project_id
-    await team_manager.record_transaction(sample_transaction)
-    
-    # Generate report
+    await agent.add_financial_record(sample_financial_record)
     start_date = datetime.now() - timedelta(days=1)
     end_date = datetime.now() + timedelta(days=1)
-    report = await team_manager.get_financial_report(start_date, end_date)
-    
-    assert report["summary"]["total_expenses"] == 1000.0
-    assert "production" in report["by_category"]
-    assert report["by_category"]["production"]["expenses"] == 1000.0
-    assert project_id in report["by_project"]
-    assert report["by_project"][project_id]["expenses"] == 1000.0
+    report = await agent.get_financial_report(start_date, end_date)
+    assert report["total_expenses"] == 1000.0
+    assert report["categories"]["studio_expenses"] == 1000.0
 
 @pytest.mark.asyncio
-async def test_get_tax_report(team_manager, sample_transaction):
-    """Test generating a tax report."""
-    # Add transaction
-    await team_manager.record_transaction(sample_transaction)
-    
-    # Generate tax report for current year
-    current_year = datetime.now().year
-    tax_report = await team_manager.get_tax_report(current_year)
-    
-    assert tax_report["year"] == current_year
-    assert tax_report["total_expenses"] == 1000.0
-    assert tax_report["deductible_expenses"] == 1000.0
-    assert "production" in tax_report["expense_categories"]
-    assert tax_report["expense_categories"]["production"] == 1000.0
+async def test_get_task_report(agent, sample_task):
+    """Test generating a task report."""
+    await agent.add_task(sample_task)
+    report = await agent.get_task_report()
+    assert report["total_tasks"] == 1
+    assert report["by_status"]["in_progress"] == 1
+    assert report["by_priority"]["high"] == 1
 
 @pytest.mark.asyncio
-async def test_budget_tracking(team_manager, sample_project, sample_budget_allocation, sample_transaction):
-    """Test budget tracking and reporting."""
-    # Create project with budget
-    project_id = await team_manager.create_project(sample_project)
-    await team_manager.set_project_budget(project_id, [sample_budget_allocation])
-    
-    # Add expense transaction
-    sample_transaction.project_id = project_id
-    await team_manager.record_transaction(sample_transaction)
-    
-    # Get financial report
-    start_date = datetime.now() - timedelta(days=1)
-    end_date = datetime.now() + timedelta(days=1)
-    report = await team_manager.get_financial_report(start_date, end_date)
-    
-    # Check budget vs actual
-    assert report["by_category"]["production"]["budget"] == 5000.0
-    assert report["by_category"]["production"]["expenses"] == 1000.0
-    assert report["by_category"]["production"]["remaining"] == 4000.0
-
-@pytest.mark.asyncio
-async def test_collaborator_payment_tracking(team_manager, sample_collaborator, sample_transaction):
-    """Test tracking payments to collaborators."""
-    # Add collaborator
-    collaborator_id = await team_manager.add_collaborator(sample_collaborator)
-    
-    # Add payment transaction
-    sample_transaction.collaborator_id = collaborator_id
-    sample_transaction.payment_id = "payment123"
-    await team_manager.record_transaction(sample_transaction)
-    
-    # Get tax report
-    current_year = datetime.now().year
-    tax_report = await team_manager.get_tax_report(current_year)
-    
-    # Check collaborator payments
-    assert collaborator_id in tax_report["collaborator_payments"]
-    assert tax_report["collaborator_payments"][collaborator_id]["name"] == "John Doe"
-    assert tax_report["collaborator_payments"][collaborator_id]["total_paid"] == 1000.0
-    assert "payment123" in tax_report["collaborator_payments"][collaborator_id]["payment_ids"] 
+async def test_get_event_report(agent, sample_event):
+    """Test generating an event report."""
+    await agent.add_event(sample_event)
+    report = await agent.get_event_report()
+    assert report["total_events"] == 1
+    assert report["by_status"]["scheduled"] == 1 
