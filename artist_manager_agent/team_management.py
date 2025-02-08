@@ -590,6 +590,16 @@ class Meeting(BaseModel):
     virtual_meeting_link: Optional[str] = None
     calendar_events: Dict[str, str] = {}  # collaborator_id -> calendar_event_id
 
+class TeamMember(BaseModel):
+    """Team member information."""
+    id: str = str(uuid.uuid4())
+    name: str
+    role: CollaboratorRole
+    contact_info: Dict[str, str] = {}
+    permissions: List[str] = []
+    created_at: datetime = datetime.now()
+    updated_at: datetime = datetime.now()
+
 class TeamManager:
     """Manage team members, projects, payments and scheduling."""
     
