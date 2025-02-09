@@ -6,7 +6,10 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
-    filters
+    filters,
+    ConversationHandler,
+    CallbackQueryHandler,
+    PicklePersistence
 )
 from artist_manager_agent.agent import ArtistManagerAgent
 from artist_manager_agent.models import (
@@ -19,6 +22,24 @@ from artist_manager_agent.models import (
     PaymentMethod,
     PaymentStatus
 )
+from artist_manager_agent.onboarding import (
+    OnboardingWizard,
+    AWAITING_NAME,
+    AWAITING_MANAGER_NAME,
+    AWAITING_GENRE,
+    AWAITING_SUBGENRE,
+    AWAITING_STYLE_DESCRIPTION,
+    AWAITING_INFLUENCES,
+    AWAITING_CAREER_STAGE,
+    AWAITING_GOALS,
+    AWAITING_GOAL_TIMELINE,
+    AWAITING_STRENGTHS,
+    AWAITING_IMPROVEMENTS,
+    AWAITING_ACHIEVEMENTS,
+    AWAITING_SOCIAL_MEDIA,
+    AWAITING_STREAMING_PROFILES,
+    CONFIRM_PROFILE
+)
 from artist_manager_agent.log import logger, log_event
 import uuid
 import logging
@@ -26,6 +47,7 @@ import asyncio
 from functools import partial
 import psutil
 import sys
+import os
 
 class ArtistManagerBot:
     def __init__(
@@ -55,39 +77,12 @@ class ArtistManagerBot:
             raise ValueError("Either agent or (artist_profile and openai_api_key) must be provided")
             
         self.team_manager = self.agent  # For compatibility with tests
-        
-        # Initialize application with job queue
-        builder = Application.builder()
-        builder.token(telegram_token or token)
-        builder.job_queue(None)  # This enables the job queue with default settings
-        self.app = builder.build()
-        
+        self.token = telegram_token or token
         self.start_time = datetime.now()
-        self._setup_handlers()
         self._is_running = False
-
-    def _setup_handlers(self):
-        """Set up command handlers and background jobs."""
-        # Command handlers
-        self.app.add_handler(CommandHandler("start", self.start))
-        self.app.add_handler(CommandHandler("help", self.help))
-        self.app.add_handler(CommandHandler("goals", self.goals))
-        self.app.add_handler(CommandHandler("tasks", self.tasks))
-        self.app.add_handler(CommandHandler("events", self.events))
-        self.app.add_handler(CommandHandler("contracts", self.contracts))
-        self.app.add_handler(CommandHandler("finances", self.finances))
-        self.app.add_handler(CommandHandler("health", self.health))
-        self.app.add_handler(CommandHandler("request_payment", self.request_payment))
-        self.app.add_handler(CommandHandler("check_payment", self.check_payment))
-        self.app.add_handler(CommandHandler("list_payments", self.list_payments))
         
-        # Add monitoring job after application is initialized
-        if self.app.job_queue:
-            self.app.job_queue.run_repeating(
-                self._monitor_metrics,
-                interval=60,
-                first=0
-            )
+        # Initialize onboarding wizard
+        self.onboarding = OnboardingWizard(self)
 
     async def _monitor_metrics(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Monitor process metrics as a background job."""
@@ -329,7 +324,7 @@ class ArtistManagerBot:
             )
         await update.message.reply_text(payments_message)
 
-    async def run(self):
+    def run(self):
         """Start the bot."""
         try:
             # Log startup
@@ -343,38 +338,85 @@ class ArtistManagerBot:
                 "python_version": sys.version
             })
             
-            # Initialize the application
-            await self.app.initialize()
-            await self.app.start()
-            self._is_running = True
+            # Set up persistence
+            persistence = PicklePersistence(filepath="bot_persistence")
             
-            # Start polling
-            await self.app.updater.start_polling(drop_pending_updates=True)
+            # Initialize application with persistence
+            application = (
+                Application.builder()
+                .token(self.token)
+                .persistence(persistence)
+                .build()
+            )
             
-            # Keep the bot running
-            while self._is_running:
-                try:
-                    await asyncio.sleep(1)
-                except asyncio.CancelledError:
-                    logger.info("Received cancellation signal")
-                    break
-                except Exception as e:
-                    logger.error(f"Error in main loop: {str(e)}")
-                    break
-                
+            # Set up onboarding conversation handler
+            onboarding_handler = ConversationHandler(
+                entry_points=[CommandHandler("start", self.onboarding.start_onboarding)],
+                states={
+                    AWAITING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_name)],
+                    AWAITING_MANAGER_NAME: [
+                        CallbackQueryHandler(self.onboarding.handle_manager_name_callback),
+                        MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_custom_manager_name)
+                    ],
+                    AWAITING_GENRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_genre)],
+                    AWAITING_SUBGENRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_subgenre)],
+                    AWAITING_STYLE_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_style)],
+                    AWAITING_INFLUENCES: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_influences)],
+                    AWAITING_CAREER_STAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_career_stage)],
+                    AWAITING_GOALS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_goals)],
+                    AWAITING_GOAL_TIMELINE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_goal_timeline)],
+                    AWAITING_STRENGTHS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_strengths)],
+                    AWAITING_IMPROVEMENTS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_improvements)],
+                    AWAITING_ACHIEVEMENTS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_achievements)],
+                    AWAITING_SOCIAL_MEDIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_social_media)],
+                    AWAITING_STREAMING_PROFILES: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_streaming)],
+                    CONFIRM_PROFILE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.onboarding.handle_confirmation)]
+                },
+                fallbacks=[CommandHandler("cancel", self.onboarding.cancel)],
+                name="onboarding_conversation",
+                persistent=True
+            )
+            
+            # Add onboarding handler first
+            application.add_handler(onboarding_handler)
+            
+            # Set up other handlers
+            application.add_handler(CommandHandler("help", self.help))
+            application.add_handler(CommandHandler("goals", self.goals))
+            application.add_handler(CommandHandler("tasks", self.tasks))
+            application.add_handler(CommandHandler("events", self.events))
+            application.add_handler(CommandHandler("contracts", self.contracts))
+            application.add_handler(CommandHandler("finances", self.finances))
+            application.add_handler(CommandHandler("health", self.health))
+            application.add_handler(CommandHandler("request_payment", self.request_payment))
+            application.add_handler(CommandHandler("check_payment", self.check_payment))
+            application.add_handler(CommandHandler("list_payments", self.list_payments))
+            
+            # Add error handler
+            async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+                """Log errors caused by updates."""
+                logger.error("Exception while handling an update:", exc_info=context.error)
+                if update and isinstance(update, Update) and update.message:
+                    await update.message.reply_text(
+                        "Sorry, something went wrong. Please try again later."
+                    )
+            
+            application.add_error_handler(error_handler)
+            
+            # Add monitoring job
+            if application.job_queue:
+                application.job_queue.run_repeating(
+                    self._monitor_metrics,
+                    interval=60,
+                    first=0
+                )
+            
+            # Start bot
+            application.run_polling(drop_pending_updates=True)
+            
         except Exception as e:
             logger.error(f"Error running bot: {str(e)}")
             raise
-        finally:
-            self._is_running = False
-            try:
-                if hasattr(self.app, 'updater') and self.app.updater:
-                    await self.app.updater.stop()
-                await self.app.stop()
-                await self.app.shutdown()
-            except Exception as e:
-                logger.error(f"Error during bot shutdown: {str(e)}")
-                # Don't re-raise here to ensure cleanup continues
 
     async def stop(self):
         """Stop the bot gracefully."""
