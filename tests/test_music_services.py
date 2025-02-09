@@ -10,7 +10,8 @@ from artist_manager_agent.agent import (
     MasteringJob,
     ReleaseType,
     MasteringPreset,
-    DistributionPlatform
+    DistributionPlatform,
+    ArtistProfile
 )
 
 @pytest.fixture
@@ -42,7 +43,33 @@ def mock_release():
 
 @pytest.fixture
 def agent():
-    return ArtistManagerAgent()
+    artist_profile = ArtistProfile(
+        id="test-artist",
+        name="Test Artist",
+        genre="Pop",
+        career_stage="Emerging",
+        goals=["Increase streaming numbers", "Book more live shows"],
+        social_media={"instagram": "@test", "twitter": "@test"},
+        email="test@example.com",
+        strengths=["Vocal performance", "Songwriting"],
+        areas_for_improvement=["Stage presence", "Marketing"],
+        achievements=["Released debut EP", "100k Spotify streams"],
+        streaming_profiles={
+            "spotify": "spotify:artist:123",
+            "apple_music": "artist:456"
+        },
+        brand_guidelines={
+            "colors": ["#FF0000", "#00FF00"],
+            "fonts": ["Helvetica", "Arial"],
+            "tone": "Energetic and positive"
+        }
+    )
+    return ArtistManagerAgent(
+        artist_profile=artist_profile,
+        openai_api_key="test-key",
+        model="gpt-3.5-turbo",
+        db_url="sqlite:///test.db"
+    )
 
 @pytest.mark.asyncio
 async def test_create_release(agent, mock_release):

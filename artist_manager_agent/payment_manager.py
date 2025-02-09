@@ -61,28 +61,21 @@ class PaymentManager:
         self.transactions: Dict[str, EnhancedTransaction] = {}
         self.budgets: Dict[str, BudgetTracking] = {}
 
-    async def generate_receipt(self, payment_id: str) -> Optional[str]:
-        """Generate a receipt for a payment.
-
-        Args:
-            payment_id (str): The ID of the payment to generate a receipt for.
-
-        Returns:
-            Optional[str]: The formatted receipt, or None if the payment is not found.
-        """
+    async def generate_receipt(self, payment_id: str) -> str:
+        """Generate a receipt for a payment."""
         payment = self.payments.get(payment_id)
         if not payment:
-            return None
-
-        # Generate receipt for any payment regardless of status
-        receipt_template = f"""Receipt #{payment_id}
-Amount: {int(payment.amount) if payment.amount.is_integer() else payment.amount} {payment.currency}
+            raise ValueError("Payment not found")
+            
+        receipt = f"""Receipt #{payment_id}
+Date: {payment.created_at.strftime('%Y-%m-%d %H:%M:%S')}
+Amount: {payment.amount} {payment.currency}
 Description: {payment.description}
+Payment Method: {payment.payment_method.value.upper()}
 Status: {payment.status.value.upper()}
-Payment Method: {payment.payment_method.value.upper() if payment.payment_method else 'N/A'}
-Date: {payment.paid_at.strftime('%Y-%m-%d %H:%M:%S') if payment.paid_at else 'Not paid yet'}
-"""
-        return receipt_template
+Paid At: {payment.paid_at.strftime('%Y-%m-%d %H:%M:%S') if payment.paid_at else 'Not paid yet'}"""
+        
+        return receipt
 
     async def send_payment_reminder(self, payment_id: str) -> bool:
         """Send a reminder for a payment.

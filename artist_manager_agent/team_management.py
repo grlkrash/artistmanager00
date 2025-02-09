@@ -214,12 +214,13 @@ class PaymentManager:
             return None
             
         receipt = f"""Receipt #{payment_id}
+Date: {payment.created_at.strftime('%Y-%m-%d %H:%M:%S')}
 Amount: {int(payment.amount) if payment.amount.is_integer() else payment.amount} {payment.currency}
 Description: {payment.description}
-Status: {payment.status.value.upper()}
 Payment Method: {payment.payment_method.value.upper() if payment.payment_method else 'N/A'}
-Date: {payment.paid_at.strftime('%Y-%m-%d %H:%M:%S') if payment.paid_at else 'Not paid yet'}
-"""
+Status: {payment.status.value.upper()}
+Paid At: {payment.paid_at.strftime('%Y-%m-%d %H:%M:%S') if payment.paid_at else 'Not paid yet'}"""
+        
         return receipt
 
     async def send_payment_reminder(self, payment_id: str) -> bool:

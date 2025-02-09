@@ -45,7 +45,33 @@ def mock_context():
 
 @pytest.fixture
 def agent():
-    return ArtistManagerAgent()
+    artist_profile = ArtistProfile(
+        id="test-artist",
+        name="Test Artist",
+        genre="Pop",
+        career_stage="Emerging",
+        goals=["Increase streaming numbers", "Book more live shows"],
+        social_media={"instagram": "@test", "twitter": "@test"},
+        email="test@example.com",
+        strengths=["Vocal performance", "Songwriting"],
+        areas_for_improvement=["Stage presence", "Marketing"],
+        achievements=["Released debut EP", "100k Spotify streams"],
+        streaming_profiles={
+            "spotify": "spotify:artist:123",
+            "apple_music": "artist:456"
+        },
+        brand_guidelines={
+            "colors": ["#FF0000", "#00FF00"],
+            "fonts": ["Helvetica", "Arial"],
+            "tone": "Energetic and positive"
+        }
+    )
+    return ArtistManagerAgent(
+        artist_profile=artist_profile,
+        openai_api_key="test-key",
+        model="gpt-3.5-turbo",
+        db_url="sqlite:///test.db"
+    )
 
 @pytest.fixture
 def sample_payment():
@@ -87,31 +113,29 @@ async def test_get_pending_payments(agent):
     """Test getting pending payments."""
     # Add pending payment
     pending_payment = FinancialRecord(
-        record_id="payment_1",
+        id="payment_1",
         type="income",
         amount=100.0,
+        currency="USD",
         description="Pending payment",
         date=datetime.now(),
         category="service_fee",
         status="pending",
-        payment_method="crypto",
-        created_at=datetime.now(),
-        updated_at=datetime.now()
+        payment_method="crypto"
     )
     await agent.add_financial_record(pending_payment)
     
     # Add completed payment
     completed_payment = FinancialRecord(
-        record_id="payment_2",
+        id="payment_2",
         type="income",
         amount=200.0,
+        currency="USD",
         description="Completed payment",
         date=datetime.now(),
         category="service_fee",
         status="completed",
-        payment_method="crypto",
-        created_at=datetime.now(),
-        updated_at=datetime.now()
+        payment_method="crypto"
     )
     await agent.add_financial_record(completed_payment)
     
@@ -126,30 +150,28 @@ async def test_get_payment_history(agent):
     """Test getting payment history."""
     # Add multiple payments
     payment1 = FinancialRecord(
-        record_id="payment_1",
+        id="payment_1",
         type="income",
         amount=100.0,
+        currency="USD",
         description="First payment",
         date=datetime.now() - timedelta(days=1),
         category="service_fee",
         status="completed",
-        payment_method="crypto",
-        created_at=datetime.now() - timedelta(days=1),
-        updated_at=datetime.now() - timedelta(days=1)
+        payment_method="crypto"
     )
     await agent.add_financial_record(payment1)
     
     payment2 = FinancialRecord(
-        record_id="payment_2",
+        id="payment_2",
         type="income",
         amount=200.0,
+        currency="USD",
         description="Second payment",
         date=datetime.now(),
         category="service_fee",
         status="completed",
-        payment_method="crypto",
-        created_at=datetime.now(),
-        updated_at=datetime.now()
+        payment_method="crypto"
     )
     await agent.add_financial_record(payment2)
     
@@ -164,31 +186,29 @@ async def test_get_payment_summary(agent):
     """Test getting payment summary."""
     # Add income payment
     income = FinancialRecord(
-        record_id="payment_1",
+        id="payment_1",
         type="income",
         amount=1000.0,
+        currency="USD",
         description="Service fee",
         date=datetime.now(),
         category="service_fee",
         status="completed",
-        payment_method="crypto",
-        created_at=datetime.now(),
-        updated_at=datetime.now()
+        payment_method="crypto"
     )
     await agent.add_financial_record(income)
     
     # Add expense payment
     expense = FinancialRecord(
-        record_id="payment_2",
+        id="payment_2",
         type="expense",
         amount=500.0,
-        description="Studio time",
+        currency="USD",
+        description="Marketing cost",
         date=datetime.now(),
-        category="studio_expenses",
+        category="marketing",
         status="completed",
-        payment_method="bank_transfer",
-        created_at=datetime.now(),
-        updated_at=datetime.now()
+        payment_method="crypto"
     )
     await agent.add_financial_record(expense)
     

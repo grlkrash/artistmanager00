@@ -118,21 +118,21 @@ async def test_mixed_concurrent_operations(agent):
     records = []
     for i in range(50):
         record = FinancialRecord(
+            id=f"record_{i}",
             date=datetime.now(),
             type="income",
             amount=1000.0,
+            currency="USD",
             category="performance",
-            description=f"Test Record {i}",
-            created_at=datetime.now(),
-            updated_at=datetime.now()
+            description=f"Test Record {i}"
         )
-        records.append(agent.add_financial_record(record))
+        records.append(record)
     
-    # Execute all operations concurrently
+    # Execute operations concurrently
     await asyncio.gather(
         *tasks,
         *events,
-        *records
+        *[agent.add_financial_record(record) for record in records]
     )
     
     end_time = time.time()

@@ -1,3 +1,4 @@
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -40,9 +41,11 @@ class BlockchainConfig(BaseModel):
     network_id: str = "base-sepolia"  # Default to testnet
     wallet_address: Optional[str] = None
     api_key: Optional[str] = None
+    weth_address: str = "0x4200000000000000000000000000000000000006"  # Base Sepolia WETH
 
 class NFTCollection(BaseModel):
     """NFT collection information."""
+    id: str
     name: str
     symbol: str
     base_uri: str
@@ -52,6 +55,7 @@ class NFTCollection(BaseModel):
 
 class Token(BaseModel):
     """Token information."""
+    id: str
     name: str
     symbol: str
     total_supply: str
@@ -80,7 +84,7 @@ class BlockchainManager:
         """Deploy a new NFT collection."""
         if not self.wallet:
             raise ValueError("Wallet not initialized")
-        
+            
         try:
             nft_contract = await self.wallet.deploy_nft(
                 name=name,
@@ -88,11 +92,16 @@ class BlockchainManager:
                 base_uri=base_uri
             )
             
-            contract_address = str(getattr(nft_contract, 'contract_address', None))
+            # Wait for contract deployment and get address
+            if hasattr(nft_contract, 'wait'):
+                nft_contract = await nft_contract.wait()
+            
+            contract_address = getattr(nft_contract, 'contract_address', None)
             if not contract_address:
                 raise ValueError("Failed to get contract address")
                 
             return NFTCollection(
+                id=str(uuid.uuid4()),
                 name=name,
                 symbol=symbol,
                 base_uri=base_uri,
@@ -101,22 +110,33 @@ class BlockchainManager:
         except Exception as e:
             raise Exception(f"Failed to deploy NFT collection: {str(e)}")
     
-    async def mint_nft(self, collection_address: str, destination: str) -> str:
-        """Mint an NFT from a collection."""
+    async def mint_nft(self, collection_address: str, recipient: str, token_uri: str) -> str:
+        """Mint a new NFT."""
         if not self.wallet:
             raise ValueError("Wallet not initialized")
-        
+            
         try:
-            result = await self.wallet.invoke_contract(
+            result = await self.wallet.mint_nft(
                 contract_address=collection_address,
-                method="mint",
-                args={"to": destination, "quantity": "1"}
+                recipient=recipient,
+                token_uri=token_uri
             )
-            tx_hash = str(getattr(result, 'transaction_hash', None) or 
-                         getattr(getattr(result, 'transaction', None), 'transaction_hash', None))
+            
+            # Wait for transaction completion
+            if hasattr(result, 'wait'):
+                result = await result.wait()
+            
+            # Try different ways to get transaction hash based on response structure
+            tx_hash = None
+            if hasattr(result, 'transaction_hash'):
+                tx_hash = result.transaction_hash
+            elif hasattr(result, 'transaction'):
+                tx_hash = result.transaction.transaction_hash
+                
             if not tx_hash:
                 raise ValueError("Failed to get transaction hash")
-            return tx_hash
+                
+            return str(tx_hash)
         except Exception as e:
             raise Exception(f"Failed to mint NFT: {str(e)}")
     
@@ -132,11 +152,16 @@ class BlockchainManager:
                 total_supply=total_supply
             )
             
-            contract_address = str(getattr(token_contract, 'contract_address', None))
+            # Wait for contract deployment and get address
+            if hasattr(token_contract, 'wait'):
+                token_contract = await token_contract.wait()
+            
+            contract_address = getattr(token_contract, 'contract_address', None)
             if not contract_address:
                 raise ValueError("Failed to get contract address")
                 
             return Token(
+                id=str(uuid.uuid4()),
                 name=name,
                 symbol=symbol,
                 total_supply=total_supply,
@@ -159,42 +184,42 @@ class BlockchainManager:
         except Exception as e:
             raise Exception(f"Failed to get balance: {str(e)}")
     
-    async def transfer(self, amount: str, asset_id: str, destination: str, gasless: bool = False) -> str:
-        """Transfer assets."""
+    async def transfer(self, token_address: str, recipient: str, amount: str) -> str:
+        """Transfer tokens."""
         if not self.wallet:
             raise ValueError("Wallet not initialized")
-        
+            
         try:
             result = await self.wallet.transfer(
-                amount=amount,
-                asset_id=asset_id,
-                destination=destination,
-                gasless=gasless
+                contract_address=token_address,
+                recipient=recipient,
+                amount=amount
             )
+            
             tx_hash = str(getattr(result, 'transaction_hash', None))
             if not tx_hash:
                 raise ValueError("Failed to get transaction hash")
+                
             return tx_hash
         except Exception as e:
-            raise Exception(f"Failed to transfer: {str(e)}")
+            raise Exception(f"Failed to transfer tokens: {str(e)}")
     
     async def wrap_eth(self, amount: str) -> str:
         """Wrap ETH to WETH."""
         if not self.wallet:
             raise ValueError("Wallet not initialized")
-        
+            
         try:
             result = await self.wallet.invoke_contract(
-                contract_address="0x4200000000000000000000000000000000000006",
-                method="deposit",
-                args={},
-                amount=amount,
-                asset_id="wei"
+                contract_address=self.config.weth_address,
+                function_name="deposit",
+                args=[amount]
             )
-            tx_hash = str(getattr(result, 'transaction_hash', None) or 
-                         getattr(getattr(result, 'transaction', None), 'transaction_hash', None))
+            
+            tx_hash = str(getattr(result, 'transaction_hash', None))
             if not tx_hash:
                 raise ValueError("Failed to get transaction hash")
+                
             return tx_hash
         except Exception as e:
             raise Exception(f"Failed to wrap ETH: {str(e)}")

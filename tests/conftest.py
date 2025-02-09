@@ -28,40 +28,23 @@ def test_data_dir():
 
 @pytest.fixture
 def artist_profile():
-    """Create a test artist profile."""
     return ArtistProfile(
-        id="test-artist",
         name="Test Artist",
-        genre="Pop",
-        career_stage="Emerging",
-        goals=["Increase streaming numbers", "Book more live shows"],
-        strengths=["Vocal ability", "Stage presence"],
-        areas_for_improvement=["Social media presence", "Networking"],
-        achievements=["Released debut EP", "100k Spotify streams"],
+        email="test@example.com",
+        genres=["pop", "rock"],
         social_media={
-            "instagram": "@testartist",
-            "twitter": "@testartist"
-        },
-        streaming_profiles={
-            "spotify": "spotify:artist:123",
-            "apple_music": "apple:artist:123"
-        },
-        brand_guidelines={
-            "colors": ["#000000", "#FFFFFF"],
-            "fonts": ["Helvetica", "Arial"]
+            "twitter": "@testartist",
+            "instagram": "@testartist"
         }
     )
 
 @pytest.fixture
 def agent(artist_profile):
-    """Create a test agent."""
     return ArtistManagerAgent(
         artist_profile=artist_profile,
-        openai_api_key="test-key",
+        openai_api_key="test_key",
         model="gpt-3.5-turbo",
-        db_url="sqlite:///:memory:",
-        telegram_token="test-token",
-        ai_mastering_key="test-key"
+        database_url="sqlite:///:memory:"
     )
 
 @pytest.fixture

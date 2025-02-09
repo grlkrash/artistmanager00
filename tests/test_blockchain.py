@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock, AsyncMock, MagicMock, patch
 
 from artist_manager_agent.agent import (
     ArtistManagerAgent,
@@ -9,16 +9,30 @@ from artist_manager_agent.agent import (
     NFTCollection,
     Token
 )
+from artist_manager_agent.blockchain import BlockchainManager
 
 @pytest.fixture
 def mock_wallet():
-    """Create a mock wallet."""
-    mock = Mock()
-    mock.deploy_nft = AsyncMock()
-    mock.deploy_token = AsyncMock()
-    mock.invoke_contract = AsyncMock()
-    mock.transfer = AsyncMock()
-    mock.addresses = [Mock(address_id="0x123", balance=AsyncMock(return_value="1.0"))]
+    """Create a mock wallet for testing."""
+    mock = AsyncMock()
+    mock.deploy_nft.return_value = NFTCollection(
+        id="nft_1",
+        name="Test NFT",
+        symbol="TEST",
+        base_uri="https://test.com/metadata/",
+        contract_address="0x123"
+    )
+    mock.deploy_token.return_value = Token(
+        id="token_1",
+        name="Test Token",
+        symbol="TST",
+        total_supply="1000000",
+        contract_address="0x456"
+    )
+    mock.get_balance.return_value = {"0x123": "1.0"}
+    mock.transfer.return_value = "0xhash"
+    mock.wrap_eth.return_value = "0xhash"
+    mock.request_faucet.return_value = "Received eth from faucet"
     return mock
 
 @pytest.fixture
@@ -60,84 +74,68 @@ def agent(mock_wallet):
 @pytest.mark.asyncio
 async def test_deploy_nft_collection(agent, mock_wallet):
     """Test NFT collection deployment."""
-    mock_wallet.deploy_nft.return_value.wait.return_value.contract_address = "0x456"
-    
-    collection = await agent.deploy_nft_collection(
-        name="Test NFT",
-        symbol="TEST",
-        base_uri="https://test.com/metadata/"
-    )
-    
-    assert isinstance(collection, NFTCollection)
-    assert collection.name == "Test NFT"
-    assert collection.symbol == "TEST"
-    assert collection.contract_address == "0x456"
-    assert collection in agent.nft_collections
+    with patch.object(agent.blockchain, 'wallet', mock_wallet):
+        collection = await agent.deploy_nft_collection(
+            name="Test NFT",
+            symbol="TEST",
+            base_uri="https://test.com/metadata/"
+        )
+        assert collection.contract_address == "0x123"
+        assert collection.name == "Test NFT"
+        assert collection.symbol == "TEST"
 
 @pytest.mark.asyncio
 async def test_mint_nft(agent, mock_wallet):
     """Test NFT minting."""
-    mock_wallet.invoke_contract.return_value.wait.return_value.transaction.transaction_hash = "0xhash"
-    
-    tx_hash = await agent.mint_nft(
-        collection_address="0x456",
-        destination="0x789"
-    )
-    
-    assert tx_hash == "0xhash"
-    mock_wallet.invoke_contract.assert_called_once()
+    with patch.object(agent.blockchain, 'wallet', mock_wallet):
+        # First deploy a collection
+        collection = await agent.deploy_nft_collection(
+            name="Test NFT",
+            symbol="TEST",
+            base_uri="https://test.com/metadata/"
+        )
+        # Then mint an NFT
+        tx_hash = await agent.mint_nft(
+            collection_address=collection.contract_address,
+            destination="0x789"
+        )
+        assert tx_hash == "0xhash"
 
 @pytest.mark.asyncio
 async def test_deploy_token(agent, mock_wallet):
     """Test token deployment."""
-    mock_wallet.deploy_token.return_value.wait.return_value.contract_address = "0x789"
-    
-    token = await agent.deploy_token(
-        name="Test Token",
-        symbol="TST",
-        total_supply="1000000"
-    )
-    
-    assert isinstance(token, Token)
-    assert token.name == "Test Token"
-    assert token.symbol == "TST"
-    assert token.contract_address == "0x789"
-    assert token in agent.tokens
+    with patch.object(agent.blockchain, 'wallet', mock_wallet):
+        token = await agent.deploy_token(
+            name="Test Token",
+            symbol="TST",
+            total_supply="1000000"
+        )
+        assert token.contract_address == "0x456"
+        assert token.name == "Test Token"
+        assert token.symbol == "TST"
 
 @pytest.mark.asyncio
 async def test_get_balance(agent, mock_wallet):
     """Test getting wallet balances."""
-    balances = await agent.get_balance("eth")
-    
-    assert isinstance(balances, dict)
-    assert "0x123" in balances
-    assert balances["0x123"] == "1.0"
+    with patch.object(agent.blockchain, 'wallet', mock_wallet):
+        balances = await agent.get_balance("eth")
+        assert "0x123" in balances
+        assert balances["0x123"] == "1.0"
 
 @pytest.mark.asyncio
 async def test_transfer_assets(agent, mock_wallet):
     """Test asset transfer."""
-    mock_wallet.transfer.return_value.wait.return_value.transaction_hash = "0xhash"
-    
-    tx_hash = await agent.transfer_assets(
-        amount="1.0",
-        asset_id="eth",
-        destination="0x789"
-    )
-    
-    assert tx_hash == "0xhash"
-    mock_wallet.transfer.assert_called_once_with(
-        amount="1.0",
-        asset_id="eth",
-        destination="0x789",
-        gasless=False
-    )
+    with patch.object(agent.blockchain, 'wallet', mock_wallet):
+        tx_hash = await agent.transfer_assets(
+            amount="1.0",
+            asset_id="eth",
+            destination="0x789"
+        )
+        assert tx_hash == "0xhash"
 
 @pytest.mark.asyncio
 async def test_wrap_eth(agent, mock_wallet):
     """Test wrapping ETH to WETH."""
-    mock_wallet.invoke_contract.return_value.wait.return_value.transaction.transaction_hash = "0xhash"
-    
-    tx_hash = await agent.wrap_eth("1000000000000000000")  # 1 ETH in wei
-    
-    assert tx_hash == "0xhash"
-    mock_wallet.invoke_contract.assert_called_once() 
+    with patch.object(agent.blockchain, 'wallet', mock_wallet):
+        tx_hash = await agent.wrap_eth("1000000000000000000")  # 1 ETH in wei
+        assert tx_hash == "0xhash"

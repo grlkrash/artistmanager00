@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
 import uuid
@@ -68,15 +68,22 @@ class Contract(BaseModelWithId):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
-class FinancialRecord(BaseModelWithId):
-    """Model for financial record keeping."""
+class FinancialRecord(BaseModel):
+    id: str
     date: datetime
-    type: str  # income, expense
+    type: str
     amount: float
-    category: str
+    currency: str
     description: str
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    category: str
+    payment_method: Optional[str] = None
+    status: str = "pending"
+    created_at: datetime = Field(default_factory=lambda: datetime.now() + timedelta(days=730))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now() + timedelta(days=730))
+
+    @property
+    def record_id(self) -> str:
+        return self.id
 
 class PaymentMethod(str, Enum):
     """Payment method options."""
@@ -177,4 +184,34 @@ class DistributionPlatform(str, Enum):
     TIDAL = "tidal"
     DEEZER = "deezer"
     SOUNDCLOUD = "soundcloud"
-    BANDCAMP = "bandcamp" 
+    BANDCAMP = "bandcamp"
+
+class NFTCollection(BaseModel):
+    id: str
+    name: str
+    symbol: str
+    base_uri: str
+    contract_address: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now() + timedelta(days=730))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now() + timedelta(days=730))
+
+    @property
+    def address(self) -> str:
+        if not self.contract_address:
+            raise ValueError("Contract address not set")
+        return self.contract_address
+
+class Token(BaseModel):
+    id: str
+    name: str
+    symbol: str
+    total_supply: str
+    contract_address: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now() + timedelta(days=730))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now() + timedelta(days=730))
+
+    @property
+    def address(self) -> str:
+        if not self.contract_address:
+            raise ValueError("Contract address not set")
+        return self.contract_address

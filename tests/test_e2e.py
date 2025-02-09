@@ -152,6 +152,7 @@ async def test_album_release_workflow(agent):
             date=datetime.now(),
             type="expense",
             amount=25000.0,
+            currency="USD",
             category="production",
             description="Initial producer payment",
             status="completed"
@@ -161,6 +162,7 @@ async def test_album_release_workflow(agent):
             date=datetime.now(),
             type="expense",
             amount=5000.0,
+            currency="USD",
             category="marketing",
             description="Marketing campaign setup",
             status="completed"
@@ -233,6 +235,7 @@ async def test_crisis_management_workflow(agent):
         date=datetime.now(),
         type="expense",
         amount=5000.0,
+        currency="USD",
         category="crisis_management",
         description="Emergency PR services",
         status="completed"
@@ -330,6 +333,7 @@ async def test_tour_planning_workflow(agent):
             date=datetime.now(),
             type="expense",
             amount=20000.0,
+            currency="USD",
             category="tour_transportation",
             description="Tour bus deposit",
             status="completed"
@@ -339,6 +343,7 @@ async def test_tour_planning_workflow(agent):
             date=datetime.now(),
             type="expense",
             amount=15000.0,
+            currency="USD",
             category="tour_staff",
             description="Staff advances",
             status="completed"

@@ -203,14 +203,16 @@ async def test_add_financial_record(agent):
         date=datetime.now(),
         type="income",
         amount=1000.0,
+        currency="USD",
         category="performance",
         description="A test financial record",
         created_at=datetime.now(),
         updated_at=datetime.now()
     )
-    result = await agent.add_financial_record(record)
-    assert result is not None
-    assert result.id == record.id
+    await agent.add_financial_record(record)
+    records = await agent.get_financial_records()
+    assert len(records) == 1
+    assert records[0].id == "test-record-123"
 
 @pytest.mark.asyncio
 async def test_update_financial_record(agent):
@@ -220,17 +222,18 @@ async def test_update_financial_record(agent):
         date=datetime.now(),
         type="income",
         amount=1000.0,
+        currency="USD",
         category="performance",
         description="A test financial record",
         created_at=datetime.now(),
         updated_at=datetime.now()
     )
     await agent.add_financial_record(record)
-    
     record.amount = 2000.0
-    result = await agent.update_financial_record(record)
-    assert result is not None
-    assert result.amount == 2000.0
+    await agent.update_financial_record(record)
+    records = await agent.get_financial_records()
+    assert len(records) == 1
+    assert records[0].amount == 2000.0
 
 @pytest.mark.asyncio
 async def test_get_financial_report(agent):
@@ -242,12 +245,12 @@ async def test_get_financial_report(agent):
             date=datetime.now(),
             type="income" if i % 2 == 0 else "expense",
             amount=1000.0,
+            currency="USD",
             category="performance",
             description=f"Test record {i}"
         )
         for i in range(5)
     ]
-    
     for record in records:
         await agent.add_financial_record(record)
     
