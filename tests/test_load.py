@@ -17,6 +17,7 @@ from artist_manager_agent.agent import (
 def agent():
     """Create a test agent."""
     profile = ArtistProfile(
+        id="test-profile-123",
         name="Test Artist",
         genre="Pop",
         career_stage="emerging",

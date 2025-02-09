@@ -248,11 +248,11 @@ class BotCommandHandler:
     def __init__(self, agent: Any):
         self.agent = agent
         self.blockchain = BlockchainCommands(agent)
-        // ... rest of existing code ...
+        # ... rest of existing code ...
     
     async def register_handlers(self, application: Any) -> None:
         """Register command handlers."""
-        // ... existing handlers ...
+        # ... existing handlers ...
         
         # Blockchain commands
         application.add_handler(CommandHandler("wallet", self.blockchain.handle_wallet))
@@ -271,4 +271,5 @@ class BotCommandHandler:
         if action.startswith(("faucet_", "deploy_", "transfer", "wrap_")):
             await self.blockchain.handle_blockchain_callback(query, action)
         else:
-            // ... existing callback handling ... 
+            # ... existing callback handling ... 
+            pass 

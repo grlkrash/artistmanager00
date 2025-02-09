@@ -16,6 +16,7 @@ from artist_manager_agent.agent import (
 def agent():
     """Create a test agent with a complete profile."""
     profile = ArtistProfile(
+        id="test-profile-123",
         name="Test Artist",
         genre="Pop",
         career_stage="emerging",
@@ -68,12 +69,14 @@ async def test_album_release_workflow(agent):
     """Test the complete workflow of planning and executing an album release."""
     # 1. Create album project
     contract = Contract(
+        id="album-contract-123",
         title="Album Production Agreement",
         parties=["Test Artist", "Producer"],
         terms={
             "duration": "6 months",
-            "deliverables": ["10 tracks", "2 music videos"],
-            "rights": "Full ownership to artist"
+            "tracks": 10,
+            "videos": 2,
+            "ownership": "artist"
         },
         status="active",
         value=50000.0,
@@ -84,6 +87,7 @@ async def test_album_release_workflow(agent):
     # 2. Create production tasks
     tasks = [
         Task(
+            id="task-vocals-123",
             title="Record vocals",
             description="Record vocals for all tracks",
             deadline=datetime.now() + timedelta(days=30),
@@ -92,6 +96,7 @@ async def test_album_release_workflow(agent):
             priority=1
         ),
         Task(
+            id="task-mix-123",
             title="Mix tracks",
             description="Mix all recorded tracks",
             deadline=datetime.now() + timedelta(days=60),
@@ -100,6 +105,7 @@ async def test_album_release_workflow(agent):
             priority=2
         ),
         Task(
+            id="task-release-123",
             title="Plan release",
             description="Plan marketing and release strategy",
             deadline=datetime.now() + timedelta(days=90),
@@ -115,6 +121,7 @@ async def test_album_release_workflow(agent):
     # 3. Schedule release events
     events = [
         Event(
+            id="event-release-123",
             title="Album Release Party",
             type="release_party",
             date=datetime.now() + timedelta(days=100),
@@ -124,6 +131,7 @@ async def test_album_release_workflow(agent):
             status="planned"
         ),
         Event(
+            id="event-press-123",
             title="Press Conference",
             type="press",
             date=datetime.now() + timedelta(days=95),
@@ -140,18 +148,22 @@ async def test_album_release_workflow(agent):
     # 4. Record financial transactions
     transactions = [
         FinancialRecord(
+            id="finance-producer-123",
             date=datetime.now(),
             type="expense",
             amount=25000.0,
             category="production",
-            description="Initial producer payment"
+            description="Initial producer payment",
+            status="completed"
         ),
         FinancialRecord(
+            id="finance-marketing-123",
             date=datetime.now(),
             type="expense",
             amount=5000.0,
             category="marketing",
-            description="Marketing campaign setup"
+            description="Marketing campaign setup",
+            status="completed"
         )
     ]
     
@@ -178,6 +190,7 @@ async def test_crisis_management_workflow(agent):
     """Test the workflow of handling a PR crisis."""
     # 1. Create crisis task
     crisis_task = Task(
+        id="task-crisis-123",
         title="Handle PR Crisis",
         description="Address negative press coverage",
         deadline=datetime.now() + timedelta(days=1),
@@ -190,20 +203,22 @@ async def test_crisis_management_workflow(agent):
     # 2. Schedule emergency meetings
     meetings = [
         Event(
+            id="event-emergency-123",
             title="Emergency Team Meeting",
             type="internal",
             date=datetime.now() + timedelta(hours=2),
-            venue="Virtual",
+            venue="Virtual Conference Room",
             capacity=10,
             budget=0.0,
             status="scheduled"
         ),
         Event(
+            id="event-press-123",
             title="Press Statement",
             type="press",
             date=datetime.now() + timedelta(days=1),
-            venue="Online",
-            capacity=0,
+            venue="Online Platform",
+            capacity=100,
             budget=1000.0,
             status="scheduled"
         )
@@ -214,11 +229,13 @@ async def test_crisis_management_workflow(agent):
     
     # 3. Record crisis management expenses
     expense = FinancialRecord(
+        id="finance-crisis-123",
         date=datetime.now(),
         type="expense",
         amount=5000.0,
         category="crisis_management",
-        description="Emergency PR services"
+        description="Emergency PR services",
+        status="completed"
     )
     await agent.add_financial_record(expense)
     
@@ -238,12 +255,13 @@ async def test_tour_planning_workflow(agent):
     """Test the workflow of planning and managing a tour."""
     # 1. Create tour contract
     tour_contract = Contract(
+        id="tour-contract-123",
         title="Summer Tour Agreement",
         parties=["Test Artist", "Tour Manager", "Venues"],
         terms={
             "duration": "3 months",
-            "venues": "10 cities",
-            "support": "Full production support"
+            "cities": 10,
+            "support": "production"
         },
         status="pending",
         value=100000.0,
@@ -254,7 +272,8 @@ async def test_tour_planning_workflow(agent):
     # 2. Create tour planning tasks
     planning_tasks = [
         Task(
-            title="Book venues",
+            id="task-venues-123",
+            title="Tour Venue Booking",
             description="Secure all tour venues",
             deadline=datetime.now() + timedelta(days=30),
             assigned_to="Tour Manager",
@@ -262,7 +281,8 @@ async def test_tour_planning_workflow(agent):
             priority=1
         ),
         Task(
-            title="Arrange transportation",
+            id="task-transport-123",
+            title="Tour Transportation",
             description="Book tour bus and flights",
             deadline=datetime.now() + timedelta(days=45),
             assigned_to="Tour Manager",
@@ -270,7 +290,8 @@ async def test_tour_planning_workflow(agent):
             priority=2
         ),
         Task(
-            title="Hire support staff",
+            id="task-staff-123",
+            title="Tour Staff Hiring",
             description="Hire technical and support crew",
             deadline=datetime.now() + timedelta(days=60),
             assigned_to="Tour Manager",
@@ -288,12 +309,13 @@ async def test_tour_planning_workflow(agent):
     
     for i in range(10):
         event = Event(
+            id=f"event-tour-{i+1}",
             title=f"Tour Stop {i+1}",
             type="concert",
             date=start_date + timedelta(days=i*3),
             venue=f"Venue {i+1}",
             capacity=1000,
-            budget=8000.0,
+            budget=5000.0,
             status="scheduled"
         )
         tour_dates.append(event)
@@ -304,18 +326,22 @@ async def test_tour_planning_workflow(agent):
     # 4. Record tour expenses
     expenses = [
         FinancialRecord(
+            id="finance-transport-123",
             date=datetime.now(),
             type="expense",
             amount=20000.0,
             category="tour_transportation",
-            description="Tour bus deposit"
+            description="Tour bus deposit",
+            status="completed"
         ),
         FinancialRecord(
+            id="finance-staff-123",
             date=datetime.now(),
             type="expense",
             amount=15000.0,
             category="tour_staff",
-            description="Staff advances"
+            description="Staff advances",
+            status="completed"
         )
     ]
     

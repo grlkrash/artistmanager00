@@ -7,6 +7,13 @@ from artist_manager_agent.agent import (
     ArtistManagerAgent,
     FinancialRecord
 )
+from artist_manager_agent.bot import ArtistManagerBot
+from artist_manager_agent.models import (
+    PaymentMethod,
+    PaymentRequest,
+    PaymentStatus,
+    ArtistProfile
+)
 
 @pytest.fixture
 def mock_bot():
@@ -193,6 +200,7 @@ async def test_get_payment_summary(agent):
     assert summary["by_category"]["service_fee"] == 1000.0
     assert summary["by_category"]["studio_expenses"] == -500.0
     assert summary["by_payment_method"]["crypto"] == 1000.0
+
 async def test_request_payment_success(bot, mock_update, mock_context):
     """Test successful payment request."""
     mock_context.args = ["100", "USD", "Test payment"]

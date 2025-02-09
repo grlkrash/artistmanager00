@@ -18,6 +18,7 @@ from artist_manager_agent.agent import (
 def agent():
     """Create a test agent."""
     profile = ArtistProfile(
+        id="test-profile-123",
         name="Test Artist",
         genre="Pop",
         career_stage="emerging",
@@ -98,6 +99,7 @@ async def test_task_operation_performance(agent):
     # Test task creation performance
     for i in range(operations):
         task = Task(
+            id=f"task-{i}",
             title=f"Performance Test Task {i}",
             description="Test task",
             deadline=datetime.now() + timedelta(days=1),
@@ -151,6 +153,7 @@ async def test_event_operation_performance(agent):
     # Test event creation performance
     for i in range(operations):
         event = Event(
+            id=f"event-{i}",
             title=f"Performance Test Event {i}",
             type="test",
             date=datetime.now() + timedelta(days=i % 30),
@@ -195,6 +198,7 @@ async def test_financial_operation_performance(agent):
     # Test financial record creation performance
     for i in range(operations):
         record = FinancialRecord(
+            id=f"record-{i}",
             date=datetime.now(),
             type="test",
             amount=100.0,
@@ -237,6 +241,7 @@ async def test_concurrent_operation_performance(agent):
     async def concurrent_operations():
         # Create a mix of operations
         task = Task(
+            id="concurrent-task",
             title="Concurrent Test Task",
             description="Test task",
             deadline=datetime.now() + timedelta(days=1),
@@ -246,6 +251,7 @@ async def test_concurrent_operation_performance(agent):
         )
         
         event = Event(
+            id="concurrent-event",
             title="Concurrent Test Event",
             type="test",
             date=datetime.now(),
@@ -256,6 +262,7 @@ async def test_concurrent_operation_performance(agent):
         )
         
         record = FinancialRecord(
+            id="concurrent-record",
             date=datetime.now(),
             type="test",
             amount=100.0,

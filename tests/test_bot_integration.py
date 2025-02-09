@@ -33,6 +33,7 @@ def mock_context():
 @pytest.fixture
 def artist_profile():
     return ArtistProfile(
+        id="test-profile-123",
         name="Test Artist",
         genre="Pop",
         career_stage="emerging",
@@ -69,7 +70,7 @@ def artist_profile():
         brand_guidelines={
             "colors": ["#FF0000", "#00FF00"],
             "fonts": ["Helvetica", "Arial"],
-            "tone": "Authentic and energetic",
+            "tone": ["Authentic", "Energetic", "Professional"],
             "values": ["Creativity", "Authenticity", "Connection"]
         },
         created_at=datetime.now(),

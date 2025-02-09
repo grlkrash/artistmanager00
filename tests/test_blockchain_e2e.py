@@ -28,6 +28,7 @@ def mock_wallet():
 def agent(mock_wallet):
     """Create a test agent with blockchain config."""
     profile = ArtistProfile(
+        id="test-profile-123",
         name="Test Artist",
         genre="Pop",
         career_stage="emerging",
@@ -52,7 +53,7 @@ def agent(mock_wallet):
     agent = ArtistManagerAgent(
         artist_profile=profile,
         openai_api_key="test_key",
-        blockchain_config=config
+        db_url="sqlite:///test.db"
     )
     
     agent.blockchain.wallet = mock_wallet
