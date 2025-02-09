@@ -13,6 +13,8 @@ from cryptography.fernet import Fernet
 import base64
 import json
 import os
+import uuid
+import random
 
 from .team_management import TeamMember, CollaboratorRole
 from .integrations import ServiceManager, SupabaseIntegration, TelegramIntegration, AIMasteringIntegration
@@ -240,8 +242,8 @@ class ArtistManagerAgent:
         try:
             self._enforce_rate_limit()
             
-            if record.amount <= 0:
-                raise ValueError("Financial record amount must be positive")
+            if record.amount < 0:
+                raise ValueError("Amount cannot be negative")
                 
             if not self._validate_input(record.description):
                 raise ValueError("Financial record description contains invalid characters")
@@ -699,5 +701,98 @@ class ArtistManagerAgent:
         end_date = end_date - timedelta(days=1)
         
         return await self.get_financial_report(start_date, end_date)
+
+    async def get_pending_payments(self) -> List[FinancialRecord]:
+        """Get all pending payments."""
+        return [
+            record for record in self.financial_records.values()
+            if record.status == "pending" and record.type == "income"
+        ]
+
+    async def get_payment_history(self) -> List[FinancialRecord]:
+        """Get payment history."""
+        return sorted(
+            [record for record in self.financial_records.values()],
+            key=lambda x: x.date,
+            reverse=True
+        )
+
+    async def get_payment_summary(self) -> Dict[str, Any]:
+        """Get a summary of all payments."""
+        self._enforce_rate_limit()
+        
+        total_income = 0.0
+        total_expenses = 0.0
+        
+        for record in self.financial_records.values():
+            if record.type == "income":
+                total_income += record.amount
+            elif record.type == "expense":
+                total_expenses += record.amount
+        
+        return {
+            "total_income": total_income,
+            "total_expenses": total_expenses,
+            "total": total_income - total_expenses,
+            "pending_count": len([r for r in self.financial_records.values() if r.status == "pending"]),
+            "completed_count": len([r for r in self.financial_records.values() if r.status == "completed"]),
+            "failed_count": len([r for r in self.financial_records.values() if r.status == "failed"])
+        }
+
+    async def add_release(self, release: Release) -> Release:
+        """Add a new music release."""
+        self._enforce_rate_limit()
+        
+        # Validate release data
+        if not release.title or not release.artist:
+            raise ValueError("Release must have a title and artist")
+        
+        if not release.tracks:
+            raise ValueError("Release must have at least one track")
+            
+        # Store the release
+        self.releases[release.id] = release
+        self._log_operation("create", "release", release.id)
+        return release
+
+    async def master_track(self, track: Track, options: Dict[str, Any]) -> Dict[str, str]:
+        """Submit a track for AI mastering."""
+        self._enforce_rate_limit()
+        
+        # Validate track data
+        if not track.title or not track.artist:
+            raise ValueError("Track must have a title and artist")
+            
+        if not track.file_path or not track.file_path.exists():
+            raise ValueError("Track must have a valid file path")
+            
+        # Validate mastering options
+        if "preset" not in options:
+            raise ValueError("Mastering options must include a preset")
+            
+        # Mock mastering process
+        return {
+            "status": "processing",
+            "job_id": str(uuid.uuid4()),
+            "estimated_completion": str(datetime.now() + timedelta(minutes=30))
+        }
+
+    async def get_platform_stats(self, platform: DistributionPlatform, release_id: str) -> Dict[str, int]:
+        """Get streaming platform statistics for a release."""
+        self._enforce_rate_limit()
+        
+        # Validate inputs
+        if not isinstance(platform, DistributionPlatform):
+            raise ValueError("Invalid platform")
+            
+        if release_id not in self.releases:
+            raise ValueError("Release not found")
+            
+        # Mock platform statistics
+        return {
+            "streams": random.randint(1000, 100000),
+            "listeners": random.randint(500, 50000),
+            "saves": random.randint(100, 10000)
+        }
 
     # ... existing methods ... 

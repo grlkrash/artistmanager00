@@ -1,0 +1,28 @@
+[Unit]
+Description=Artist Manager Bot Service
+After=network.target
+
+[Service]
+Type=simple
+User=artistmanager
+Group=artistmanager
+WorkingDirectory=/opt/artistmanager
+Environment=PYTHONPATH=/opt/artistmanager
+EnvironmentFile=/opt/artistmanager/.env
+ExecStart=/opt/artistmanager/.venv/bin/python /opt/artistmanager/deploy_prod.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/artistmanager/output.log
+StandardError=append:/var/log/artistmanager/error.log
+
+# Security
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target 

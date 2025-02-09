@@ -1,0 +1,42 @@
+# Core dependencies
+python-telegram-bot>=20.0
+pydantic>=2.0.0
+langchain>=0.1.0
+langchain-community>=0.0.10
+openai>=1.0.0
+python-dotenv>=1.0.0
+
+# Database and storage
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+supabase>=2.0.0
+
+# Async utilities
+aiohttp>=3.9.0
+asyncio>=3.4.3
+
+# Monitoring and logging
+psutil>=5.9.0
+prometheus-client>=0.17.0
+structlog>=23.1.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+pytest-mock>=3.10.0
+
+# Development
+black>=23.0.0
+isort>=5.12.0
+mypy>=1.0.0
+flake8>=6.0.0
+
+# Type checking
+types-python-dateutil>=2.8.19
+types-requests>=2.31.0
+
+# Documentation
+mkdocs>=1.4.0
+mkdocs-material>=9.1.0
+mkdocstrings>=0.22.0 

@@ -16,9 +16,11 @@ from artist_manager_agent.agent import (
 
 @pytest.fixture
 def mock_track():
+    """Create a mock track for testing."""
     return Track(
         title="Test Track",
         artist="Test Artist",
+        duration=180,  # 3 minutes in seconds
         genre="Pop",
         release_date=datetime.now(),
         file_path=Path("/test/track.wav"),
@@ -72,9 +74,19 @@ def agent():
     )
 
 @pytest.mark.asyncio
-async def test_create_release(agent, mock_release):
+async def test_create_release(agent, mock_track):
     """Test creating a release."""
-    await agent.add_release(mock_release)
+    await agent.add_release(Release(
+        title="Test Album",
+        artist="Test Artist",
+        type=ReleaseType.ALBUM,
+        tracks=[mock_track],
+        genre="Pop",
+        release_date=datetime.now(),
+        artwork_path=Path("/test/artwork.jpg"),
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    ))
     releases = await agent.get_releases()
     assert len(releases) == 1
     assert releases[0].title == "Test Album"
@@ -90,12 +102,21 @@ async def test_submit_for_mastering(agent, mock_track):
     assert result["status"] == "processing"
 
 @pytest.mark.asyncio
-async def test_get_platform_stats(agent, mock_release):
+async def test_get_platform_stats(agent, mock_track):
     """Test getting platform-specific statistics."""
-    await agent.add_release(mock_release)
+    release = Release(
+        title="Test Album",
+        artist="Test Artist",
+        type=ReleaseType.ALBUM,
+        tracks=[mock_track],
+        genre="Pop",
+        release_date=datetime.now(),
+        artwork_path=Path("/test/artwork.jpg")
+    )
+    await agent.add_release(release)
     stats = await agent.get_platform_stats(
         platform=DistributionPlatform.SPOTIFY,
-        release_id=mock_release.id
+        release_id=release.id
     )
     assert "streams" in stats
     assert "listeners" in stats

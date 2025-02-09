@@ -3,6 +3,7 @@ from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
 import uuid
 from enum import Enum
+from pathlib import Path
 
 class BaseModelWithId(BaseModel):
     """Base model with ID field and hash support."""
@@ -115,15 +116,17 @@ class PaymentRequest(BaseModelWithId):
     error_message: Optional[str] = None
     metadata: Dict[str, str] = Field(default_factory=dict)
 
-class Track(BaseModelWithId):
+class Track(BaseModel):
     """Represents a music track."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: str
     artist: str
-    duration: int  # in seconds
-    genre: Optional[str] = None
-    release_date: Optional[datetime] = None
+    duration: int  # Duration in seconds
+    genre: str
+    release_date: datetime
     streaming_url: Optional[str] = None
     download_url: Optional[str] = None
+    file_path: Optional[Path] = None
     metadata: Dict[str, Any] = {}
 
 class ReleaseType(str, Enum):
@@ -159,21 +162,12 @@ class MasteringJob(BaseModelWithId):
     error_message: Optional[str] = None
     metadata: Dict[str, Any] = {}
 
-class MasteringPreset(BaseModelWithId):
-    """Represents a mastering preset configuration."""
-    name: str
-    description: Optional[str] = None
-    settings: Dict[str, Any] = {
-        "loudness": -14.0,  # LUFS
-        "true_peak": -1.0,  # dB
-        "bass_boost": 0.0,  # dB
-        "high_boost": 0.0,  # dB
-        "stereo_width": 100,  # %
-        "compression": 0.5,  # ratio
-    }
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
-    metadata: Dict[str, Any] = {}
+class MasteringPreset(str, Enum):
+    BALANCED = "balanced"
+    LOUD = "loud"
+    WARM = "warm"
+    BRIGHT = "bright"
+    BASS_BOOST = "bass_boost"
 
 class DistributionPlatform(str, Enum):
     """Music distribution platforms."""
@@ -192,14 +186,21 @@ class NFTCollection(BaseModel):
     symbol: str
     base_uri: str
     contract_address: Optional[str] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now() + timedelta(days=730))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now() + timedelta(days=730))
+    created_at: datetime = Field(default_factory=lambda: datetime.now())
+    updated_at: datetime = Field(default_factory=lambda: datetime.now())
 
     @property
     def address(self) -> str:
+        """Get the contract address."""
         if not self.contract_address:
             raise ValueError("Contract address not set")
         return self.contract_address
+
+    model_config = {
+        "validate_assignment": True,
+        "extra": "allow",
+        "arbitrary_types_allowed": True
+    }
 
 class Token(BaseModel):
     id: str
@@ -207,11 +208,18 @@ class Token(BaseModel):
     symbol: str
     total_supply: str
     contract_address: Optional[str] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now() + timedelta(days=730))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now() + timedelta(days=730))
+    created_at: datetime = Field(default_factory=lambda: datetime.now())
+    updated_at: datetime = Field(default_factory=lambda: datetime.now())
 
     @property
     def address(self) -> str:
+        """Get the contract address."""
         if not self.contract_address:
             raise ValueError("Contract address not set")
         return self.contract_address
+
+    model_config = {
+        "validate_assignment": True,
+        "extra": "allow",
+        "arbitrary_types_allowed": True
+    }

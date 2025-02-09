@@ -14,24 +14,24 @@ from artist_manager_agent.agent import (
 def mock_wallet():
     """Create a mock wallet for testing."""
     mock = AsyncMock()
-    mock.deploy_nft.return_value = NFTCollection(
+    mock.deploy_nft = AsyncMock(return_value=NFTCollection(
         id="nft_1",
         name="Artist NFTs",
         symbol="ARTNFT",
         base_uri="https://api.example.com/nft/",
         contract_address="0x123"
-    )
-    mock.deploy_token.return_value = Token(
+    ))
+    mock.deploy_token = AsyncMock(return_value=Token(
         id="token_1",
         name="Artist Fan Token",
         symbol="ARTFAN",
         total_supply="1000000",
         contract_address="0x456"
-    )
-    mock.get_balance.return_value = {"0x123": "1.0"}
-    mock.transfer.return_value = "0xhash"
-    mock.wrap_eth.return_value = "0xhash"
-    mock.request_faucet.return_value = "Received eth from faucet"
+    ))
+    mock.get_balance = AsyncMock(return_value={"0x123": "1.0"})
+    mock.transfer = AsyncMock(return_value="0xhash")
+    mock.wrap_eth = AsyncMock(return_value="0xhash")
+    mock.request_faucet = AsyncMock(return_value="Received eth from faucet")
     return mock
 
 @pytest.fixture
@@ -84,10 +84,11 @@ async def test_nft_collection_workflow(agent, mock_wallet):
             base_uri="https://api.example.com/nft/"
         )
         assert collection.contract_address == "0x123"
+        assert collection.address == "0x123"
         
         # Mint NFTs
         tx_hash = await agent.mint_nft(
-            collection_address=collection.contract_address,
+            collection_address=collection.address,
             destination="0x789"
         )
         assert tx_hash == "0xhash"
@@ -107,11 +108,12 @@ async def test_token_and_transfer_workflow(agent, mock_wallet):
             total_supply="1000000"
         )
         assert token.contract_address == "0x456"
+        assert token.address == "0x456"
         
         # Transfer tokens
         tx_hash = await agent.transfer_assets(
             amount="100",
-            asset_id=token.contract_address,
+            asset_id=token.address,
             destination="0x789"
         )
         assert tx_hash == "0xhash"
