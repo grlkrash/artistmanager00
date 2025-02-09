@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Optional
 import asyncio
 from datetime import datetime
 import json
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field

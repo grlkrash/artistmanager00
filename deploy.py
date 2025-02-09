@@ -48,6 +48,7 @@ async def run_bot() -> None:
         logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
         return
 
+    bot = None
     try:
         # Initialize bot
         artist_profile = ArtistProfile(
@@ -72,13 +73,8 @@ async def run_bot() -> None:
             db_url=os.getenv("DATABASE_URL", "sqlite:///artist_manager.db")
         )
 
-        # Get the current event loop
-        loop = asyncio.get_running_loop()
-        
-        # Set up exception handler
-        loop.set_exception_handler(handle_exception)
-        
         # Set up signal handlers
+        loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(
                 sig,
@@ -90,29 +86,53 @@ async def run_bot() -> None:
 
     except Exception as e:
         log_error(e, {"main": "bot_initialization"})
+        if bot and hasattr(bot, 'app'):
+            try:
+                await bot.app.stop()
+                await bot.app.shutdown()
+            except Exception as cleanup_error:
+                log_error(cleanup_error, {"cleanup": "bot_shutdown"})
         raise
 
 def main() -> None:
     """Main entry point."""
+    loop = None
     try:
-        # Create new event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Get or create event loop
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Set exception handler
+        loop.set_exception_handler(handle_exception)
         
         # Run the bot
         loop.run_until_complete(run_bot())
-        loop.run_forever()
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt")
     except Exception as e:
         logger.error(f"Error in main loop: {str(e)}")
     finally:
-        try:
-            loop.run_until_complete(loop.shutdown_asyncgens())
-            loop.close()
-        except Exception as e:
-            logger.error(f"Error during loop cleanup: {str(e)}")
-        logger.info("Shutdown complete.")
+        if loop is not None:
+            try:
+                # Cancel all tasks
+                tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+                if tasks:
+                    for task in tasks:
+                        task.cancel()
+                    loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+                
+                # Cleanup
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                
+                if not loop.is_closed():
+                    loop.close()
+            except Exception as e:
+                logger.error(f"Error during cleanup: {str(e)}")
+            finally:
+                logger.info("Shutdown complete.")
 
 if __name__ == "__main__":
     main() 

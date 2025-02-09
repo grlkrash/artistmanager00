@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.schema import SystemMessage, HumanMessage
 from enum import Enum
 import asyncio

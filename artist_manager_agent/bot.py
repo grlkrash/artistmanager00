@@ -337,37 +337,44 @@ class ArtistManagerBot:
                 "config": {
                     "model": self.agent.model,
                     "db_url": self.agent.db_url,
+                    "log_level": logger.level
                 },
                 "pid": psutil.Process().pid,
                 "python_version": sys.version
             })
             
-            # Start the bot
+            # Initialize the application
             await self.app.initialize()
             await self.app.start()
             self._is_running = True
             
-            # Start polling without blocking
-            await self.app.updater.start_polling(
-                allowed_updates=Update.ALL_TYPES,
-                drop_pending_updates=True
-            )
+            # Start polling
+            await self.app.updater.start_polling(drop_pending_updates=True)
             
-            # Keep running until stopped
+            # Keep the bot running
             while self._is_running:
-                await asyncio.sleep(1)
-            
+                try:
+                    await asyncio.sleep(1)
+                except asyncio.CancelledError:
+                    logger.info("Received cancellation signal")
+                    break
+                except Exception as e:
+                    logger.error(f"Error in main loop: {str(e)}")
+                    break
+                
         except Exception as e:
             logger.error(f"Error running bot: {str(e)}")
             raise
         finally:
-            if self._is_running:
-                self._is_running = False
-                try:
+            self._is_running = False
+            try:
+                if hasattr(self.app, 'updater') and self.app.updater:
                     await self.app.updater.stop()
-                    await self.app.stop()
-                except Exception as e:
-                    logger.error(f"Error stopping bot: {str(e)}")
+                await self.app.stop()
+                await self.app.shutdown()
+            except Exception as e:
+                logger.error(f"Error during bot shutdown: {str(e)}")
+                # Don't re-raise here to ensure cleanup continues
 
     async def stop(self):
         """Stop the bot gracefully."""
