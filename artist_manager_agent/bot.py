@@ -19,7 +19,13 @@ from artist_manager_agent.models import (
     PaymentMethod,
     PaymentStatus
 )
+from artist_manager_agent.log import logger, log_event
 import uuid
+import logging
+import asyncio
+from functools import partial
+import psutil
+import sys
 
 class ArtistManagerBot:
     def __init__(
@@ -49,11 +55,20 @@ class ArtistManagerBot:
             raise ValueError("Either agent or (artist_profile and openai_api_key) must be provided")
             
         self.team_manager = self.agent  # For compatibility with tests
-        self.app = Application.builder().token(telegram_token or token).build()
+        
+        # Initialize application with job queue
+        builder = Application.builder()
+        builder.token(telegram_token or token)
+        builder.job_queue(None)  # This enables the job queue with default settings
+        self.app = builder.build()
+        
+        self.start_time = datetime.now()
         self._setup_handlers()
+        self._is_running = False
 
     def _setup_handlers(self):
-        """Set up command handlers."""
+        """Set up command handlers and background jobs."""
+        # Command handlers
         self.app.add_handler(CommandHandler("start", self.start))
         self.app.add_handler(CommandHandler("help", self.help))
         self.app.add_handler(CommandHandler("goals", self.goals))
@@ -65,6 +80,38 @@ class ArtistManagerBot:
         self.app.add_handler(CommandHandler("request_payment", self.request_payment))
         self.app.add_handler(CommandHandler("check_payment", self.check_payment))
         self.app.add_handler(CommandHandler("list_payments", self.list_payments))
+        
+        # Add monitoring job after application is initialized
+        if self.app.job_queue:
+            self.app.job_queue.run_repeating(
+                self._monitor_metrics,
+                interval=60,
+                first=0
+            )
+
+    async def _monitor_metrics(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Monitor process metrics as a background job."""
+        try:
+            # Collect metrics
+            cpu_percent = psutil.Process().cpu_percent()
+            memory_info = psutil.Process().memory_info()
+            
+            # Log metrics
+            log_event("process_metrics", {
+                "cpu_percent": cpu_percent,
+                "memory_rss": memory_info.rss,
+                "memory_vms": memory_info.vms,
+                "uptime_seconds": (datetime.now() - self.start_time).total_seconds()
+            })
+            
+            # Check thresholds
+            if cpu_percent > 80:
+                logger.warning(f"High CPU usage: {cpu_percent}%")
+            if memory_info.rss > 1024 * 1024 * 1024:  # 1GB
+                logger.warning("High memory usage")
+                
+        except Exception as e:
+            logger.error(f"Error in process monitoring: {str(e)}")
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /start command."""
@@ -284,7 +331,44 @@ class ArtistManagerBot:
 
     async def run(self):
         """Start the bot."""
-        await self.app.initialize()
-        await self.app.start()
-        await self.app.run_polling()
-        await self.app.stop() 
+        try:
+            # Log startup
+            log_event("startup", {
+                "config": {
+                    "model": self.agent.model,
+                    "db_url": self.agent.db_url,
+                },
+                "pid": psutil.Process().pid,
+                "python_version": sys.version
+            })
+            
+            # Start the bot
+            await self.app.initialize()
+            await self.app.start()
+            self._is_running = True
+            
+            # Start polling without blocking
+            await self.app.updater.start_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True
+            )
+            
+            # Keep running until stopped
+            while self._is_running:
+                await asyncio.sleep(1)
+            
+        except Exception as e:
+            logger.error(f"Error running bot: {str(e)}")
+            raise
+        finally:
+            if self._is_running:
+                self._is_running = False
+                try:
+                    await self.app.updater.stop()
+                    await self.app.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping bot: {str(e)}")
+
+    async def stop(self):
+        """Stop the bot gracefully."""
+        self._is_running = False 
