@@ -108,38 +108,211 @@ class OnboardingWizard:
 
     async def handle_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the goals input."""
-        goals = [g.strip() for g in update.message.text.split(",")]
+        text = update.message.text.strip()
+        
+        # Split by common separators and clean up
+        goals = [
+            goal.strip()
+            for goal in re.split(r'[,;\n•\-]', text)
+            if goal.strip()
+        ]
+        
+        if not goals:
+            await update.message.reply_text(
+                "I couldn't detect any goals. Please share your goals as an artist.\n"
+                "You can:\n"
+                "• List them one per line\n"
+                "• Separate them with commas\n"
+                "• Use bullet points\n\n"
+                "Example:\n"
+                "Release an EP by end of year\n"
+                "Reach 10k monthly listeners\n"
+                "Book 5 live shows"
+            )
+            return AWAITING_GOALS
+            
         context.user_data['goals'] = goals
+        
+        # Show what was understood
+        goals_str = "\n".join(f"• {goal}" for goal in goals)
         await update.message.reply_text(
-            "What are your strengths as an artist? (List them separated by commas)"
+            f"I understood these goals:\n\n{goals_str}\n\n"
+            "Is this correct? (yes/no)\n"
+            "If yes, let's move on to your strengths.\n"
+            "If no, please enter your goals again."
+        )
+        
+        if update.message.text.lower() == 'no':
+            return AWAITING_GOALS
+            
+        await update.message.reply_text(
+            "Great! Now, what would you say are your strengths as an artist?\n"
+            "You can:\n"
+            "• List them one per line\n"
+            "• Separate them with commas\n"
+            "• Use bullet points\n\n"
+            "Example:\n"
+            "Strong vocal range\n"
+            "Experienced with live performances\n"
+            "Good at social media engagement"
         )
         return AWAITING_STRENGTHS
 
     async def handle_strengths(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the strengths input."""
-        strengths = [s.strip() for s in update.message.text.split(",")]
+        text = update.message.text.strip()
+        
+        # Split by common separators and clean up
+        strengths = [
+            strength.strip()
+            for strength in re.split(r'[,;\n•\-]', text)
+            if strength.strip()
+        ]
+        
+        if not strengths:
+            await update.message.reply_text(
+                "I couldn't detect any strengths. Please share your strengths as an artist.\n"
+                "You can:\n"
+                "• List them one per line\n"
+                "• Separate them with commas\n"
+                "• Use bullet points\n\n"
+                "Example:\n"
+                "Strong vocal range\n"
+                "Experienced with live performances\n"
+                "Good at social media engagement"
+            )
+            return AWAITING_STRENGTHS
+            
         context.user_data['strengths'] = strengths
+        
+        # Show what was understood
+        strengths_str = "\n".join(f"• {strength}" for strength in strengths)
         await update.message.reply_text(
-            "What areas would you like to improve? (List them separated by commas)"
+            f"I understood these strengths:\n\n{strengths_str}\n\n"
+            "Is this correct? (yes/no)\n"
+            "If yes, let's move on to areas you'd like to improve.\n"
+            "If no, please enter your strengths again."
+        )
+        
+        if update.message.text.lower() == 'no':
+            return AWAITING_STRENGTHS
+            
+        await update.message.reply_text(
+            "Great! Now, what areas would you like to improve?\n"
+            "You can:\n"
+            "• List them one per line\n"
+            "• Separate them with commas\n"
+            "• Use bullet points\n\n"
+            "Example:\n"
+            "Music theory knowledge\n"
+            "Studio recording techniques\n"
+            "Marketing strategy"
         )
         return AWAITING_IMPROVEMENTS
 
     async def handle_improvements(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the improvements input."""
-        improvements = [i.strip() for i in update.message.text.split(",")]
+        text = update.message.text.strip()
+        
+        # Split by common separators and clean up
+        improvements = [
+            improvement.strip()
+            for improvement in re.split(r'[,;\n•\-]', text)
+            if improvement.strip()
+        ]
+        
+        if not improvements:
+            await update.message.reply_text(
+                "I couldn't detect any areas for improvement. Please share what you'd like to improve.\n"
+                "You can:\n"
+                "• List them one per line\n"
+                "• Separate them with commas\n"
+                "• Use bullet points\n\n"
+                "Example:\n"
+                "Music theory knowledge\n"
+                "Studio recording techniques\n"
+                "Marketing strategy"
+            )
+            return AWAITING_IMPROVEMENTS
+            
         context.user_data['areas_for_improvement'] = improvements
+        
+        # Show what was understood
+        improvements_str = "\n".join(f"• {improvement}" for improvement in improvements)
         await update.message.reply_text(
-            "Please list your notable achievements (separated by commas)"
+            f"I understood these areas for improvement:\n\n{improvements_str}\n\n"
+            "Is this correct? (yes/no)\n"
+            "If yes, let's move on to your achievements.\n"
+            "If no, please enter the areas again."
+        )
+        
+        if update.message.text.lower() == 'no':
+            return AWAITING_IMPROVEMENTS
+            
+        await update.message.reply_text(
+            "Great! Now, what are your notable achievements?\n"
+            "You can:\n"
+            "• List them one per line\n"
+            "• Separate them with commas\n"
+            "• Use bullet points\n\n"
+            "Example:\n"
+            "Released debut EP in 2023\n"
+            "Performed at SXSW\n"
+            "100k+ streams on Spotify"
         )
         return AWAITING_ACHIEVEMENTS
 
     async def handle_achievements(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the achievements input."""
-        achievements = [a.strip() for a in update.message.text.split(",")]
+        text = update.message.text.strip()
+        
+        # Split by common separators and clean up
+        achievements = [
+            achievement.strip()
+            for achievement in re.split(r'[,;\n•\-]', text)
+            if achievement.strip()
+        ]
+        
+        if not achievements:
+            await update.message.reply_text(
+                "I couldn't detect any achievements. Please share your notable achievements.\n"
+                "You can:\n"
+                "• List them one per line\n"
+                "• Separate them with commas\n"
+                "• Use bullet points\n\n"
+                "Example:\n"
+                "Released debut EP in 2023\n"
+                "Performed at SXSW\n"
+                "100k+ streams on Spotify"
+            )
+            return AWAITING_ACHIEVEMENTS
+            
         context.user_data['achievements'] = achievements
+        
+        # Show what was understood
+        achievements_str = "\n".join(f"• {achievement}" for achievement in achievements)
         await update.message.reply_text(
-            "Please list your social media handles (format: platform:handle, separated by commas)\n"
-            "Example: instagram:@artist, twitter:@artist"
+            f"I understood these achievements:\n\n{achievements_str}\n\n"
+            "Is this correct? (yes/no)\n"
+            "If yes, let's move on to your social media profiles.\n"
+            "If no, please enter your achievements again."
+        )
+        
+        if update.message.text.lower() == 'no':
+            return AWAITING_ACHIEVEMENTS
+            
+        await update.message.reply_text(
+            "Great! Now, let's add your social media profiles.\n"
+            "You can:\n"
+            "• Paste full profile URLs\n"
+            "• Use @handles (optionally followed by platform name)\n"
+            "• Use format 'platform - handle'\n"
+            "• Separate multiple profiles with commas or new lines\n\n"
+            "Example inputs:\n"
+            "https://instagram.com/artistname\n"
+            "@artistname twitter\n"
+            "instagram - @artistname\n"
+            "facebook: fb.com/artistpage"
         )
         return AWAITING_SOCIAL_MEDIA
 
@@ -392,13 +565,80 @@ class OnboardingWizard:
         prompts = {
             1: ("What's your artist name?", AWAITING_NAME),
             2: ("What genre best describes your music?", AWAITING_GENRE),
-            3: ("What's your current career stage? (emerging/established/veteran)", AWAITING_CAREER_STAGE),
-            4: ("What are your main goals as an artist? (List them separated by commas)", AWAITING_GOALS),
-            5: ("What are your strengths as an artist? (List them separated by commas)", AWAITING_STRENGTHS),
-            6: ("What areas would you like to improve? (List them separated by commas)", AWAITING_IMPROVEMENTS),
-            7: ("Please list your notable achievements (separated by commas)", AWAITING_ACHIEVEMENTS),
-            8: ("Please list your social media handles (format: platform:handle, separated by commas)", AWAITING_SOCIAL_MEDIA),
-            9: ("Please list your streaming profiles (format: platform:profile_url, separated by commas)", AWAITING_STREAMING_PROFILES)
+            3: ("What's your current career stage?\nChoose from: emerging, established, or veteran", AWAITING_CAREER_STAGE),
+            4: (
+                "What are your main goals as an artist?\n"
+                "You can:\n"
+                "• List them one per line\n"
+                "• Separate them with commas\n"
+                "• Use bullet points\n\n"
+                "Example:\n"
+                "Release an EP by end of year\n"
+                "Reach 10k monthly listeners\n"
+                "Book 5 live shows",
+                AWAITING_GOALS
+            ),
+            5: (
+                "What are your strengths as an artist?\n"
+                "You can:\n"
+                "• List them one per line\n"
+                "• Separate them with commas\n"
+                "• Use bullet points\n\n"
+                "Example:\n"
+                "Strong vocal range\n"
+                "Experienced with live performances\n"
+                "Good at social media engagement",
+                AWAITING_STRENGTHS
+            ),
+            6: (
+                "What areas would you like to improve?\n"
+                "You can:\n"
+                "• List them one per line\n"
+                "• Separate them with commas\n"
+                "• Use bullet points\n\n"
+                "Example:\n"
+                "Music theory knowledge\n"
+                "Studio recording techniques\n"
+                "Marketing strategy",
+                AWAITING_IMPROVEMENTS
+            ),
+            7: (
+                "What are your notable achievements?\n"
+                "You can:\n"
+                "• List them one per line\n"
+                "• Separate them with commas\n"
+                "• Use bullet points\n\n"
+                "Example:\n"
+                "Released debut EP in 2023\n"
+                "Performed at SXSW\n"
+                "100k+ streams on Spotify",
+                AWAITING_ACHIEVEMENTS
+            ),
+            8: (
+                "Let's add your social media profiles.\n"
+                "You can:\n"
+                "• Paste full profile URLs\n"
+                "• Use @handles (optionally followed by platform name)\n"
+                "• Use format 'platform - handle'\n"
+                "• Separate multiple profiles with commas or new lines\n\n"
+                "Example inputs:\n"
+                "https://instagram.com/artistname\n"
+                "@artistname twitter\n"
+                "instagram - @artistname\n"
+                "facebook: fb.com/artistpage",
+                AWAITING_SOCIAL_MEDIA
+            ),
+            9: (
+                "Please share your streaming profiles.\n"
+                "You can:\n"
+                "• Paste the URLs directly\n"
+                "• Enter them one per line\n"
+                "• Separate them with commas\n\n"
+                "Example:\n"
+                "https://open.spotify.com/artist/...\n"
+                "https://music.apple.com/artist/...",
+                AWAITING_STREAMING_PROFILES
+            )
         }
         
         prompt, next_state = prompts[choice]
