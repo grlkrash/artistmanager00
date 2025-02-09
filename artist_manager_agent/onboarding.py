@@ -662,7 +662,13 @@ class OnboardingWizard:
                 CONFIRM_PROFILE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_confirmation)],
                 EDIT_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_edit_choice)],
             },
-            fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+            fallbacks=[
+                CommandHandler("cancel", lambda u, c: ConversationHandler.END),
+                CommandHandler("start", self.start_onboarding)  # Allow restarting
+            ],
             name="onboarding",
-            persistent=True
+            persistent=True,
+            allow_reentry=True,  # Allow users to restart the conversation
+            per_chat=False,  # Use per-user persistence instead of per-chat
+            per_user=True  # Enable per-user conversation tracking
         ) 

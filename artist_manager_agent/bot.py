@@ -144,18 +144,43 @@ class ArtistManagerBot:
     ):
         """Initialize the bot."""
         self.token = telegram_token
+        
+        # Ensure data directories exist
+        data_dir = Path("data")
+        persistence_dir = data_dir / "bot_persistence"
+        data_dir.mkdir(exist_ok=True)
+        persistence_dir.mkdir(exist_ok=True)
+        (persistence_dir / "backups").mkdir(exist_ok=True)
+        
+        # Initialize persistence with proper path
+        persistence_path = str(persistence_dir / "persistence.pickle")
         self.persistence = RobustPersistence(
-            filepath="data/bot_persistence/persistence.pickle",
+            filepath=persistence_path,
             backup_count=3
         )
         
-        # Initialize agent and onboarding wizard
+        # Initialize default artist profile if none provided
+        self.artist_profile = artist_profile or ArtistProfile(
+            id="default",
+            name="Artist",
+            genre="",
+            career_stage="emerging",
+            goals=[],
+            strengths=[],
+            areas_for_improvement=[],
+            achievements=[],
+            social_media={},
+            streaming_profiles={},
+            brand_guidelines={}
+        )
+        
+        # Initialize agent with artist profile
         self.agent = ArtistManagerAgent(
-            artist_profile=artist_profile,
-            openai_api_key=openai_api_key,
+            artist_profile=self.artist_profile,
+            openai_api_key=openai_api_key or os.getenv("OPENAI_API_KEY"),
             model=model,
             db_url=db_url
-        ) if artist_profile and openai_api_key else None
+        )
         
         self.onboarding = OnboardingWizard(self)
         self._is_running = False
@@ -163,19 +188,20 @@ class ArtistManagerBot:
         
     def register_handlers(self, application: Application) -> None:
         """Register all command handlers."""
-        # Onboarding conversation handler must be registered first
-        application.add_handler(self.onboarding.get_conversation_handler())
+        # Register start command and onboarding handler in same group for proper coordination
+        application.add_handler(CommandHandler("start", self.start), group=1)
+        application.add_handler(self.onboarding.get_conversation_handler(), group=1)
         
-        # Core commands
-        application.add_handler(CommandHandler("help", self.help))
-        application.add_handler(CommandHandler("goals", self.goals))
-        application.add_handler(CommandHandler("tasks", self.tasks))
-        application.add_handler(CommandHandler("events", self.events))
-        application.add_handler(CommandHandler("contracts", self.contracts))
+        # Core commands with lower priority
+        application.add_handler(CommandHandler("help", self.help), group=2)
+        application.add_handler(CommandHandler("goals", self.goals), group=2)
+        application.add_handler(CommandHandler("tasks", self.tasks), group=2)
+        application.add_handler(CommandHandler("events", self.events), group=2)
+        application.add_handler(CommandHandler("contracts", self.contracts), group=2)
         
         # Auto mode and project handlers
-        application.add_handler(CommandHandler("auto", self.toggle_auto_mode))
-        application.add_handler(CommandHandler("newproject", self.create_project))
+        application.add_handler(CommandHandler("auto", self.toggle_auto_mode), group=2)
+        application.add_handler(CommandHandler("newproject", self.create_project), group=2)
         
         # Error handler
         application.add_error_handler(self.error_handler)
@@ -184,15 +210,17 @@ class ArtistManagerBot:
         """Handle the /start command."""
         try:
             user_id = update.effective_user.id
+            logger.info(f"Start command received from user {user_id}")
+            
             if not context.user_data.get("profile_confirmed"):
-                # Start onboarding if no confirmed profile
+                logger.info(f"Starting onboarding for user {user_id}")
                 await update.message.reply_text(
                     "Welcome! Let's set up your artist profile. "
                     "I'll ask you a series of questions to get to know you better."
                 )
                 return await self.onboarding.start_onboarding(update, context)
             else:
-                # Show dashboard for existing users
+                logger.info(f"Showing dashboard for existing user {user_id}")
                 await update.message.reply_text(
                     f"Welcome back! Here are your available commands:\n"
                     f"/goals - View and manage your goals\n"
@@ -203,7 +231,7 @@ class ArtistManagerBot:
                     f"/help - Show all available commands"
                 )
         except Exception as e:
-            logger.error(f"Error in start command: {str(e)}")
+            logger.error(f"Error in start command for user {user_id}: {str(e)}")
             await update.message.reply_text(
                 "Sorry, I encountered an error. Please try again."
             )
