@@ -1,0 +1,18 @@
+{
+    "version": 2,
+    "builds": [
+        {
+            "src": "deploy_prod.py",
+            "use": "@vercel/python"
+        }
+    ],
+    "routes": [
+        {
+            "src": "/(.*)",
+            "dest": "deploy_prod.py"
+        }
+    ],
+    "env": {
+        "PYTHONPATH": "."
+    }
+} 

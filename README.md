@@ -1,355 +1,102 @@
-<div align="center">
-  <p>
-    <a href="https://docs.cdp.coinbase.com/agentkit/docs/welcome">
-      <img src="./agentkit_banner.png"/>
-    </a>
-  </p>
-  <h1 style="font-size: 3em; margin-bottom: 20px;">
-    AgentKit
-  </h1>
+# Artist Manager Bot
 
-  <p>
-    <img src="./agent_k.webp" width="300"/>
-  </p>
+A Telegram bot powered by AI to help manage artists' careers.
 
-  <p style="font-size: 1.2em; max-width: 600px; margin: 0 auto 20px;">
-    Every agent deserves a wallet.
-  </p>
+## Features
 
-[![PyPI - Downloads](https://img.shields.io/pypi/dm/cdp-agentkit-core?style=flat-square)](https://pypistats.org/packages/cdp-agentkit-core)
-[![npm downloads](https://img.shields.io/npm/dm/@coinbase/cdp-agentkit-core?style=flat-square)](https://www.npmjs.com/package/@coinbase/agentkit)
-[![GitHub star chart](https://img.shields.io/github/stars/coinbase/cdp-agentkit?style=flat-square)](https://star-history.com/#coinbase/agentkit)
-[![Open Issues](https://img.shields.io/github/issues-raw/coinbase/cdp-agentkit?style=flat-square)](https://github.com/coinbase/agentkit/issues)
+- 🎵 Artist onboarding wizard
+- 🎯 Goal tracking and management
+- 📅 Event scheduling
+- 💰 Financial tracking
+- 📊 Analytics and reporting
+- 🔗 Blockchain integration
 
-</div>
+## Local Development
 
-## Table of Contents
-
-- [📖 Overview](#-overview)
-- [🚀 Quickstart](#-quickstart)
-  - [Node.js](#nodejs)
-  - [Python](#python)
-- [🗂 Repository Structure](#-repository-structure)
-- [🤝 Contributing](#-contributing)
-- [📜 Documentation](#-documentation)
-- [🚨 Security and bug reports](#-security-and-bug-reports)
-- [📧 Contact](#-contact)
-- [📝 License](#-license)
-- [🔒 Legal and Privacy](#-legal-and-privacy)
-- [🔍 Testing](#-testing)
-  - [Running Tests](#running-tests)
-  - [Test Structure](#test-structure)
-- [🚀 Running the Bot](#-running-the-bot)
-- [🔧 Development](#-development)
-  - [Code Style](#code-style)
-  - [Pre-commit Hooks](#pre-commit-hooks)
-- [🚀 Deployment](#-deployment)
-- [🔍 Monitoring](#-monitoring)
-- [🔮 Future Improvements](#-future-improvements)
-
-## 📖 Overview
-
-AgentKit is [Coinbase Developer Platform's](https://docs.cdp.coinbase.com) framework for easily enabling AI agents to take actions onchain. It is designed to be framework-agnostic, so you can use it with any AI framework, and wallet-agnostic, so you can use it with any wallet. AgentKit is actively being built out, and [welcomes community contributions!](#contributing)
-
-<div align="center">
-  <a href="https://www.youtube.com/watch?v=-R_mKpdepRE">
-    <img src="https://img.youtube.com/vi/-R_mKpdepRE/maxresdefault.jpg" alt="Video Title" style="max-width: 600px;">
-  </a>
-</div>
-
-## 🚀 Quickstart
-
-### Node.js
-
-*Prerequisites*:
-- [Node.js 18+](https://nodejs.org/en/download/)
-- [CDP Secret API Key](https://docs.cdp.coinbase.com/get-started/docs/cdp-api-keys#creating-secret-api-keys)
-- [OpenAI API Key](https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key)
-
-1. Get your agent running:
-
+1. Clone the repository:
 ```bash
-# Clone the repository
-git clone https://github.com/coinbase/agentkit.git
-
-# Navigate to the root of the repo
-cd agentkit
-
-# Install dependencies
-npm install
-
-# Build the packages locally
-npm run build
-
-# Navigate to the langchain-cdp-chatbot example
-cd typescript/examples/langchain-cdp-chatbot
-
-# At this point, fill in your CDP API key name, private key, and OpenAI API key in
-# the .env.local file.
-# Then, rename the .env.local file to .env
-mv .env.local .env
-
-# Run the chatbot
-npm run start
+git clone https://github.com/yourusername/artistmanager00.git
+cd artistmanager00
 ```
-2. Select "1. chat mode" and start telling your Agent to do things onchain!
 
+2. Create and activate a virtual environment:
 ```bash
-Prompt: Fund my wallet with some testnet ETH.
--------------------
-Wallet: ccaf1dbf-3a90-4e52-ad34-89a07aad9e8b on network: base-sepolia with default address: 0xD9b990c7b0079c1c3733D2918Ee50b68f29FCFD5
--------------------
-
--------------------
-Received eth from the faucet. Transaction: https://sepolia.basescan.org/tx/0x03e82934cd04be5b725927729b517c606f6f744611f0f36e834f21ad742ad7ca
--------------------
-Your wallet has been successfully funded with testnet ETH. You can view the transaction [here](https://sepolia.basescan.org/tx/0x03e82934cd04be5b725927729b517c606f6f744611f0f36e834f21ad742ad7ca).
--------------------
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
 
-### Python
-
-*Prerequisites*:
-- [Python 3.10+](https://www.python.org/downloads/)
-- [Poetry](https://python-poetry.org/docs/)
-- [CDP Secret API Key](https://docs.cdp.coinbase.com/get-started/docs/cdp-api-keys#creating-secret-api-keys)
-- [OpenAI API Key](https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key)
-
-1. Get your agent running:
-
+3. Install dependencies:
 ```bash
-# Clone the repository
-git clone https://github.com/coinbase/agentkit.git
-
-# Navigate to the chatbot-python example
-cd agentkit/python/examples/cdp-langchain-chatbot 
-
-# At this point, fill in your CDP API key name, private key, and OpenAI API key in the
-# .env.example file.
-# Then, rename the .env.example file to .env
-mv .env.example .env
-
-# Install dependencies
-poetry install
-
-# Run the chatbot
-make run
+pip install -r requirements.txt
 ```
-2. Select "1. chat mode" and start telling your Agent to do things onchain!
 
+4. Create a `.env` file with your configuration:
+```env
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-3.5-turbo
+DATABASE_URL=sqlite:///artist_manager.db
+LOG_LEVEL=INFO
+```
+
+5. Run the bot:
 ```bash
-Prompt: Fund my wallet with some testnet ETH.
--------------------
-Wallet: ccaf1dbf-3a90-4e52-ad34-89a07aad9e8b on network: base-sepolia with default address: 0xD9b990c7b0079c1c3733D2918Ee50b68f29FCFD5
--------------------
-
--------------------
-Received eth from the faucet. Transaction: https://sepolia.basescan.org/tx/0x03e82934cd04be5b725927729b517c606f6f744611f0f36e834f21ad742ad7ca
--------------------
-Your wallet has been successfully funded with testnet ETH. You can view the transaction [here](https://sepolia.basescan.org/tx/0x03e82934cd04be5b725927729b517c606f6f744611f0f36e834f21ad742ad7ca).
--------------------
+python deploy.py
 ```
 
-## 🗂 Repository Structure
+## Vercel Deployment
 
-AgentKit is organized as a monorepo that contains multiple packages.
-
-```
-./
-├── typescript/
-│   ├── agentkit/
-│   ├── framework-extensions/
-│   |   └── langchain/
-│   └── examples/
-│       ├── langchain-cdp-chatbot/
-│       ├── langchain-farcaster-chatbot/
-│       └── langchain-twitter-chatbot/
-├── python/
-│   ├── cdp-agentkit-core/
-│   ├── cdp-langchain/
-│   ├── twitter-langchain/
-│   └── examples/
-│       ├── cdp-langchain-chatbot/
-│       └── twitter-langchain-chatbot/
-```
-
-## 🤝 Contributing
-
-**AgentKit is actively looking for community contributions!**
-
-- To see a list of actions and frameworks we'd love to see open-source contributions for, see [WISHLIST.md](./WISHLIST.md).
-- To understand the process for contributing to AgentKit, see [CONTRIBUTING.md](./CONTRIBUTING.md).
-
-## 📜 Documentation
-
-- [AgentKit Documentation](https://docs.cdp.coinbase.com/agentkit/docs/welcome)
-- Python API References
-  - [AgentKit Core](https://coinbase.github.io/agentkit/cdp-agentkit-core/python/index.html)
-  - [AgentKit Langchain Extension](https://coinbase.github.io/agentkit/cdp-langchain/python/index.html)
-- Node.js API References
-  - [AgentKit](https://coinbase.github.io/agentkit/agentkit/typescript/index.html)
-  - [AgentKit Langchain Extension](https://coinbase.github.io/agentkit/agentkit-langchain/typescript/index.html)
-
-## 🚨 Security and Bug Reports
-
-The AgentKit team takes security seriously.
-See [SECURITY.md](SECURITY.md) for more information.
-
-## 📧 Contact
-
-For feature requests, feedback, or questions, please reach out to us via the 
-[Coinbase Developer Platform Discord](https://discord.com/channels/1220414409550336183/1304126107876069376).
-
-## 📝 License
-
-AgentKit is licensed under the [Apache-2.0](LICENSE.md) license.
-
-## 🔒 Legal and Privacy
-
-The AgentKit software is novel and experimental, and is therefore provided on an AS-IS basis. The software is intended to be used only for the purposes of assisting with designing blockchain transactions and enabling other API integrations using natural language inputs, and is not intended to provide (i) an offer, or solicitation of an offer, to invest in, or to buy or sell, any interests or shares, or to participate in any investment or trading strategy, (ii) accounting, legal, tax advice, investment recommendations or other professional advice or (iii) an official statement of Coinbase. Acts proposed or performed by an agent through AgentKit software are NOT acts of Coinbase. You should consult with a professional advisor before making any decisions based on the information provided by the software. You are not permitted to use the proceeds of loans or credit to purchase digital assets on or through coinbase.com, Coinbase's APIs, the Coinbase mobile application, or any other Coinbase website or product, including AgentKit. No representation or warranty is made, expressed or implied, with respect to the accuracy, completeness, reliability, security, or suitability of the software or to any information provided in connection with the software. The risk of loss through use of the software can be substantial, and you assume any and all risks of loss and liability. The software may produce output that is inaccurate, incorrect, unpredictable or undesirable, and it is the user's exclusive responsibility to evaluate the output and the use-case and determine whether it is appropriate. The right to use the software is contingent on your agreement to the [CDP Terms of Service](https://www.coinbase.com/legal/developer-platform/terms-of-service) (except to the extent it conflicts with the Apache-2.0 license).
-
-## 🔍 Testing
-
-### Running Tests
-
-1. Set up test environment:
+1. Install the Vercel CLI:
 ```bash
-cp .env.example .env.test
-# Edit .env.test with your test configuration
+npm i -g vercel
 ```
 
-2. Install test dependencies:
+2. Login to Vercel:
 ```bash
-pip install -r requirements-dev.txt
+vercel login
 ```
 
-3. Run tests:
+3. Deploy to Vercel:
 ```bash
-# Run all tests
-pytest
-
-# Run specific test file
-pytest tests/test_bot_integration.py
-
-# Run with coverage report
-pytest --cov=artist_manager_agent tests/
+vercel
 ```
 
-### Test Structure
+4. Set up environment variables in Vercel:
+- Go to your project settings
+- Add the following environment variables:
+  - `TELEGRAM_BOT_TOKEN`
+  - `OPENAI_API_KEY`
+  - `OPENAI_MODEL`
+  - `DATABASE_URL`
+  - `LOG_LEVEL`
 
-- `tests/test_bot_integration.py`: Bot command and flow integration tests
-- `tests/test_music_services.py`: Music service integration tests
-- `tests/test_payments.py`: Payment system unit tests
-- `tests/test_team_management.py`: Team management unit tests
-- `tests/test_financial_tracking.py`: Financial tracking unit tests
-
-## 🚀 Running the Bot
-
-1. Set up environment variables:
+5. Set up the Telegram webhook:
 ```bash
-cp .env.example .env
-# Edit .env with your configuration
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://your-vercel-url.vercel.app/api/vercel"
 ```
 
-2. Initialize the database:
-```bash
-python scripts/init_db.py
-```
+## Project Structure
 
-3. Start the bot:
-```bash
-python main.py
-```
+- `artist_manager_agent/` - Main bot code
+  - `bot.py` - Bot initialization and core logic
+  - `onboarding.py` - Onboarding wizard
+  - `models.py` - Data models
+  - `agent.py` - AI agent logic
+  - `blockchain.py` - Blockchain integration
+  - `log.py` - Logging utilities
+- `api/` - Vercel serverless functions
+- `tests/` - Test suite
+- `deploy.py` - Local deployment script
+- `deploy_prod.py` - Production deployment script
 
-## 🔧 Development
+## Contributing
 
-### Code Style
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
-The project uses:
-- Black for code formatting
-- isort for import sorting
-- mypy for type checking
+## License
 
-Run formatting:
-```bash
-black .
-isort .
-```
-
-Check types:
-```bash
-mypy .
-```
-
-### Pre-commit Hooks
-
-1. Install pre-commit:
-```bash
-pip install pre-commit
-pre-commit install
-```
-
-2. Run hooks:
-```bash
-pre-commit run --all-files
-```
-
-## 🚀 Deployment
-
-1. Build Docker image:
-```bash
-docker build -t artist-manager-bot .
-```
-
-2. Run container:
-```bash
-docker run -d --env-file .env artist-manager-bot
-```
-
-## 🔍 Monitoring
-
-The bot includes:
-- Logging to stdout/stderr
-- Error tracking
-- Performance metrics
-- Health checks
-
-Monitor using:
-```bash
-# View logs
-docker logs -f artist-manager-bot
-
-# Check health
-curl http://localhost:8080/health
-
-# View metrics
-curl http://localhost:8080/metrics
-```
-
-## 🔮 Future Improvements
-
-1. **Features**
-   - Multi-language support
-   - Advanced analytics dashboard
-   - AI-powered content generation
-   - Automated social media scheduling
-   - Enhanced payment integrations
-
-2. **Technical**
-   - Microservices architecture
-   - GraphQL API
-   - Real-time notifications
-   - Caching layer
-   - Rate limiting
-
-3. **Testing**
-   - E2E test suite
-   - Performance testing
-   - Load testing
-   - Security testing
-
-4. **Documentation**
-   - API documentation
-   - Integration guides
-   - Contribution guidelines
-   - Deployment strategies
+MIT License - see LICENSE file for details

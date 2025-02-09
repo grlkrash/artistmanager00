@@ -17,6 +17,45 @@ class BaseModelWithId(BaseModel):
             return False
         return self.id == other.id
 
+class Project(BaseModelWithId):
+    """Model for project management."""
+    title: str
+    description: str
+    start_date: datetime
+    end_date: datetime
+    status: str
+    team_members: List[str]
+    tasks: List[str] = []  # List of task IDs
+    budget: Optional[float] = None
+    milestones: List[Dict[str, Any]] = []
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+class CollaboratorRole(str, Enum):
+    """Roles for team members."""
+    PRODUCER = "producer"
+    SONGWRITER = "songwriter"
+    MUSICIAN = "musician"
+    VOCALIST = "vocalist"
+    ENGINEER = "engineer"
+    MANAGER = "manager"
+    DESIGNER = "designer"
+    MARKETING = "marketing"
+    OTHER = "other"
+
+class CollaboratorProfile(BaseModelWithId):
+    """Model for team member profiles."""
+    name: str
+    role: CollaboratorRole
+    skills: List[str]
+    availability: Dict[str, List[str]]  # Day of week -> time slots
+    rate: Optional[float] = None
+    contact_info: Dict[str, str]
+    portfolio_url: Optional[str] = None
+    social_media: Dict[str, str] = {}
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
 class ArtistProfile(BaseModel):
     """Model for artist profile information."""
     id: str
