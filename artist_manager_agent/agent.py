@@ -26,6 +26,7 @@ from .models import (
     Track, Release, ReleaseType, MasteringJob,
     MasteringPreset, DistributionPlatform, ArtistProfile
 )
+from .ai_handler import AIHandler
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -51,6 +52,9 @@ class ArtistManagerAgent:
         self.db_url = database_url or db_url  # Use database_url if provided, otherwise use db_url
         self.telegram_token = telegram_token
         self.ai_mastering_key = ai_mastering_key
+        
+        # Initialize AI handler
+        self.ai_handler = AIHandler(openai_api_key=self.openai_api_key, model=self.model)
         
         # Rate limiting
         self.last_operation_time = time.time()
