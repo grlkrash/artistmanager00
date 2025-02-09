@@ -15,6 +15,7 @@ import json
 import os
 import uuid
 import random
+from langchain.prompts import ChatPromptTemplate
 
 from .team_management import TeamMember, CollaboratorRole
 from .integrations import ServiceManager, SupabaseIntegration, TelegramIntegration, AIMasteringIntegration
@@ -794,5 +795,345 @@ class ArtistManagerAgent:
             "listeners": random.randint(500, 50000),
             "saves": random.randint(100, 10000)
         }
+
+    async def execute_command(
+        self,
+        command: str,
+        args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute a command with given arguments."""
+        try:
+            # Validate command and args
+            if not self._validate_input(command):
+                raise ValueError("Invalid command")
+            
+            for value in args.values():
+                if isinstance(value, str) and not self._validate_input(value):
+                    raise ValueError("Invalid argument value")
+
+            # Map commands to methods
+            command_map = {
+                "create_project": self.create_project,
+                "add_task": self.add_task,
+                "create_event": self.add_event,
+                "create_contract": self.add_contract,
+                "request_payment": self.payment_manager.create_payment_request,
+                "add_team_member": self.add_team_member,
+                "create_release": self.create_release,
+                "submit_for_mastering": self.submit_for_mastering,
+                "check_platform_stats": self.get_platform_stats,
+                "update_profile": self.update_profile,
+                "send_message": self.send_message,
+                "research_venues": self.research_venues,
+                "contact_promoter": self.contact_promoter,
+                "analyze_metrics": self.analyze_metrics,
+                "create_campaign": self.create_campaign,
+                "schedule_promotion": self.schedule_promotion
+            }
+
+            if command not in command_map:
+                raise ValueError(f"Unknown command: {command}")
+
+            # Execute command
+            result = await command_map[command](**args)
+            
+            return {
+                "success": True,
+                "command": command,
+                "args": args,
+                "result": result
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "command": command,
+                "args": args,
+                "error": str(e)
+            }
+
+    async def get_current_state(self) -> Dict[str, Any]:
+        """Get the current state of the artist's career."""
+        try:
+            # Gather data from various sources
+            tasks = await self.get_tasks()
+            events = await self.get_events_in_range(
+                datetime.now(),
+                datetime.now() + timedelta(days=90)
+            )
+            team = list(self.team.values())
+            releases = list(self.releases.values())
+            contracts = list(self.contracts.values())
+            finances = list(self.finances.values())
+            
+            # Get platform statistics
+            platform_stats = {}
+            for platform in DistributionPlatform:
+                try:
+                    stats = await self.get_platform_stats(platform)
+                    platform_stats[platform.value] = stats
+                except:
+                    continue
+            
+            # Compile state
+            state = {
+                "profile": self.artist_profile.dict(),
+                "tasks": {
+                    "total": len(tasks),
+                    "pending": len([t for t in tasks if t.status == "pending"]),
+                    "completed": len([t for t in tasks if t.status == "completed"])
+                },
+                "events": {
+                    "upcoming": len(events),
+                    "types": {}
+                },
+                "team": {
+                    "size": len(team),
+                    "roles": {}
+                },
+                "releases": {
+                    "total": len(releases),
+                    "recent": len([r for r in releases if r.release_date > datetime.now() - timedelta(days=90)])
+                },
+                "contracts": {
+                    "active": len([c for c in contracts if c.status == "active"]),
+                    "pending": len([c for c in contracts if c.status == "pending"])
+                },
+                "finances": {
+                    "recent_income": sum(f.amount for f in finances 
+                                      if f.type == "income" and f.date > datetime.now() - timedelta(days=30)),
+                    "recent_expenses": sum(f.amount for f in finances 
+                                        if f.type == "expense" and f.date > datetime.now() - timedelta(days=30))
+                },
+                "platform_stats": platform_stats,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Add event type breakdown
+            for event in events:
+                if event.type not in state["events"]["types"]:
+                    state["events"]["types"][event.type] = 0
+                state["events"]["types"][event.type] += 1
+            
+            # Add team role breakdown
+            for member in team:
+                if member.role not in state["team"]["roles"]:
+                    state["team"]["roles"][member.role] = 0
+                state["team"]["roles"][member.role] += 1
+            
+            return state
+        except Exception as e:
+            logger.error(f"Error getting current state: {str(e)}")
+            return {
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    async def research_venues(self, criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Research venues matching the given criteria."""
+        try:
+            # Format prompt for venue research
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are an AI that researches music venues based on criteria."),
+                ("human", f"Find venues matching these criteria: {json.dumps(criteria)}")
+            ])
+            
+            # Get suggestions from LLM
+            response = await self.llm.agenerate([prompt.format_messages()])
+            
+            # Parse venue suggestions (expecting JSON array)
+            venues = json.loads(response.generations[0][0].text)
+            
+            return venues
+        except Exception as e:
+            logger.error(f"Error researching venues: {str(e)}")
+            return []
+
+    async def contact_promoter(
+        self,
+        promoter_info: Dict[str, Any],
+        message_template: str
+    ) -> Dict[str, Any]:
+        """Contact a promoter with a customized message."""
+        try:
+            # Format prompt for message customization
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are an AI that customizes outreach messages for music promoters."),
+                ("human", f"Customize this template for the promoter:\nTemplate: {message_template}\nPromoter: {json.dumps(promoter_info)}")
+            ])
+            
+            # Get customized message
+            response = await self.llm.agenerate([prompt.format_messages()])
+            message = response.generations[0][0].text
+            
+            # Send message (implement actual sending logic)
+            # For now, just return the message
+            return {
+                "success": True,
+                "message": message,
+                "promoter": promoter_info
+            }
+        except Exception as e:
+            logger.error(f"Error contacting promoter: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def analyze_metrics(
+        self,
+        metric_type: str,
+        timeframe: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze specific metrics over a timeframe."""
+        try:
+            metrics = {}
+            
+            if metric_type == "engagement":
+                # Analyze social media and streaming engagement
+                for platform in self.artist_profile.streaming_profiles:
+                    stats = await self.get_platform_stats(platform)
+                    metrics[platform] = stats
+                    
+            elif metric_type == "financial":
+                # Analyze financial performance
+                records = [r for r in self.finances.values()
+                         if timeframe["start"] <= r.date <= timeframe["end"]]
+                metrics["total_income"] = sum(r.amount for r in records if r.type == "income")
+                metrics["total_expenses"] = sum(r.amount for r in records if r.type == "expense")
+                
+            elif metric_type == "events":
+                # Analyze event performance
+                events = [e for e in self.events.values()
+                         if timeframe["start"] <= e.date <= timeframe["end"]]
+                metrics["total_events"] = len(events)
+                metrics["attendance"] = sum(e.attendance for e in events if hasattr(e, "attendance"))
+                
+            return metrics
+        except Exception as e:
+            logger.error(f"Error analyzing metrics: {str(e)}")
+            return {}
+
+    async def create_campaign(
+        self,
+        campaign_type: str,
+        target_audience: Dict[str, Any],
+        budget: float,
+        duration: timedelta
+    ) -> Dict[str, Any]:
+        """Create a marketing campaign."""
+        try:
+            # Format prompt for campaign planning
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are an AI that creates marketing campaigns for artists."),
+                ("human", f"Create a {campaign_type} campaign plan:\nAudience: {json.dumps(target_audience)}\nBudget: ${budget}\nDuration: {duration.days} days")
+            ])
+            
+            # Get campaign plan
+            response = await self.llm.agenerate([prompt.format_messages()])
+            campaign_plan = json.loads(response.generations[0][0].text)
+            
+            # Create campaign record
+            campaign = {
+                "id": str(uuid.uuid4()),
+                "type": campaign_type,
+                "target_audience": target_audience,
+                "budget": budget,
+                "duration": duration.days,
+                "plan": campaign_plan,
+                "status": "created",
+                "created_at": datetime.now().isoformat()
+            }
+            
+            # Store campaign
+            if not hasattr(self, "campaigns"):
+                self.campaigns = {}
+            self.campaigns[campaign["id"]] = campaign
+            
+            return campaign
+        except Exception as e:
+            logger.error(f"Error creating campaign: {str(e)}")
+            return {
+                "error": str(e)
+            }
+
+    async def schedule_promotion(
+        self,
+        content: Dict[str, Any],
+        platforms: List[str],
+        schedule: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Schedule promotional content across platforms."""
+        try:
+            # Format prompt for content optimization
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are an AI that optimizes promotional content for different platforms."),
+                ("human", f"Optimize this content for each platform:\nContent: {json.dumps(content)}\nPlatforms: {json.dumps(platforms)}")
+            ])
+            
+            # Get optimized content
+            response = await self.llm.agenerate([prompt.format_messages()])
+            optimized_content = json.loads(response.generations[0][0].text)
+            
+            # Create promotion schedule
+            promotion = {
+                "id": str(uuid.uuid4()),
+                "content": optimized_content,
+                "platforms": platforms,
+                "schedule": schedule,
+                "status": "scheduled",
+                "created_at": datetime.now().isoformat()
+            }
+            
+            # Store promotion
+            if not hasattr(self, "promotions"):
+                self.promotions = {}
+            self.promotions[promotion["id"]] = promotion
+            
+            return promotion
+        except Exception as e:
+            logger.error(f"Error scheduling promotion: {str(e)}")
+            return {
+                "error": str(e)
+            }
+
+    async def send_message(
+        self,
+        recipient: Dict[str, Any],
+        message_type: str,
+        content: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Send a message to a recipient."""
+        try:
+            # Format prompt for message customization
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are an AI that customizes professional messages."),
+                ("human", f"Create a {message_type} message:\nRecipient: {json.dumps(recipient)}\nContent: {json.dumps(content)}")
+            ])
+            
+            # Get customized message
+            response = await self.llm.agenerate([prompt.format_messages()])
+            message = response.generations[0][0].text
+            
+            # Create message record
+            message_record = {
+                "id": str(uuid.uuid4()),
+                "recipient": recipient,
+                "type": message_type,
+                "content": message,
+                "status": "sent",
+                "sent_at": datetime.now().isoformat()
+            }
+            
+            # Store message
+            if not hasattr(self, "messages"):
+                self.messages = {}
+            self.messages[message_record["id"]] = message_record
+            
+            return message_record
+        except Exception as e:
+            logger.error(f"Error sending message: {str(e)}")
+            return {
+                "error": str(e)
+            }
 
     # ... existing methods ... 

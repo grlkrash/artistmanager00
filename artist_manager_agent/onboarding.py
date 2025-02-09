@@ -347,6 +347,17 @@ What's your artist name?
                 for field in required_fields:
                     setattr(self.agent.artist_profile, field, self.temp_data[field])
                 
+                # Set profile confirmation in user data
+                context.user_data['profile_confirmed'] = True
+                context.user_data['artist_profile'] = self.agent.artist_profile
+                
+                # Save the data immediately
+                if context.application.persistence:
+                    await context.application.persistence.update_user_data(
+                        user_id=update.effective_user.id,
+                        data=context.user_data
+                    )
+                
                 await query.edit_message_text(
                     "✅ Perfect! Your profile has been set up. I'm ready to help manage your career!\n"
                     "Use /help to see available commands."
@@ -435,7 +446,7 @@ What's your artist name?
             f"🎯 Goals:\n" + "\n".join(f"  • {goal}" for goal in self.temp_data['goals']),
             f"💪 Strengths:\n" + "\n".join(f"  • {strength}" for strength in self.temp_data['strengths']),
             f"📚 Areas for Improvement:\n" + "\n".join(f"  • {area}" for area in self.temp_data['areas_for_improvement']),
-            f"�� Achievements:\n" + "\n".join(f"  • {achievement}" for achievement in self.temp_data['achievements']),
+            f" Achievements:\n" + "\n".join(f"  • {achievement}" for achievement in self.temp_data['achievements']),
             f"📱 Social Media:\n" + "\n".join(f"  • {platform}: {handle}" for platform, handle in self.temp_data['social_media'].items()),
             f"🎧 Streaming Profiles:\n" + "\n".join(f"  • {platform}: {link}" for platform, link in self.temp_data['streaming_profiles'].items())
         ]

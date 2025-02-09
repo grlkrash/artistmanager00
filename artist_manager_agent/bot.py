@@ -78,6 +78,10 @@ class ArtistManagerBot:
         if not self.token:
             raise ValueError("No Telegram token provided")
 
+        # Initialize persistence directory
+        os.makedirs("data", exist_ok=True)
+        self.persistence_path = "data/bot_persistence"
+
         if agent:
             self.agent = agent
         else:
@@ -134,17 +138,16 @@ class ArtistManagerBot:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /start command."""
-        logger.info(f"Received /start command from user {update.effective_user.id}")
-        
-        # Check if user has a confirmed profile
-        if (hasattr(self.agent, 'artist_profile') and 
-            self.agent.artist_profile and 
-            self.agent.artist_profile.name):  # Basic check if profile exists
+        try:
+            # Check if user has a profile in context
+            user_id = str(update.effective_user.id)
+            if not context.user_data.get('profile_confirmed'):
+                # No confirmed profile, start onboarding
+                return await self.onboarding.start_onboarding(update, context)
             
-            # Show dashboard with available commands
+            # Profile exists, show dashboard
             dashboard_message = (
-                f"👋 Welcome back, {self.agent.artist_profile.name}!\n\n"
-                "Here's your Artist Manager Dashboard:\n\n"
+                f"👋 Welcome back! Here's your artist dashboard:\n\n"
                 "🎵 Music Services:\n"
                 "/releases - Manage releases\n"
                 "/master - Submit track for mastering\n"
@@ -152,11 +155,11 @@ class ArtistManagerBot:
                 "👥 Team Management:\n"
                 "/team - View team members\n"
                 "/addmember - Add team member\n"
-                "/avail - Check availability\n\n"
+                "/avail - Check team availability\n\n"
                 "📋 Project Management:\n"
                 "/projects - View all projects\n"
                 "/newproject - Create new project\n"
-                "/milestones - View milestones\n\n"
+                "/milestones - View project milestones\n\n"
                 "✅ Task Management:\n"
                 "/tasks - View tasks\n"
                 "/newtask - Create new task\n\n"
@@ -180,10 +183,13 @@ class ArtistManagerBot:
                 "Use /help to see this menu again."
             )
             await update.message.reply_text(dashboard_message)
-            return
             
-        # If no profile exists, start the onboarding wizard
-        return await self.onboarding.start_onboarding(update, context)
+        except Exception as e:
+            logger.error(f"Error in start command: {e}")
+            await update.message.reply_text(
+                "Sorry, there was an error. Let's start over with the onboarding process."
+            )
+            return await self.onboarding.start_onboarding(update, context)
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /help command."""
@@ -566,40 +572,166 @@ class ArtistManagerBot:
         self._auto_mode = not self._auto_mode
         status = "enabled" if self._auto_mode else "disabled"
         
-        await update.message.reply_text(
-            f"🤖 Autonomous mode {status}!\n\n"
-            f"The bot will {'now' if self._auto_mode else 'no longer'} "
-            f"automatically take actions toward your goals."
-        )
-        
         if self._auto_mode:
+            # Get current goals and state
+            goals = self.agent.artist_profile.goals
+            current_state = await self.agent.get_current_state()
+            
+            # Create initial message
+            await update.message.reply_text(
+                f"🤖 Autonomous mode {status}!\n\n"
+                "I'll now actively work towards your goals:\n" +
+                "\n".join(f"• {goal}" for goal in goals) + "\n\n"
+                "I'll keep you updated on my progress and any significant actions I take."
+            )
+            
             # Start autonomous loop in background
             context.application.create_task(
-                self.agent.autonomous_mode(
-                    self.agent.artist_profile.goals,
-                    max_actions=5,
-                    delay=60
+                self._run_autonomous_mode(
+                    update.effective_chat.id,
+                    context
                 )
             )
+        else:
+            await update.message.reply_text(
+                f"🤖 Autonomous mode {status}!\n\n"
+                "I'll stop taking autonomous actions. You can re-enable autonomous mode anytime with /auto."
+            )
+
+    async def _run_autonomous_mode(
+        self,
+        chat_id: int,
+        context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Run the autonomous mode loop."""
+        try:
+            while self._auto_mode:
+                # Get current goals and state
+                goals = self.agent.artist_profile.goals
+                current_state = await self.agent.get_current_state()
+                
+                # Create plans for each goal if needed
+                for goal in goals:
+                    plan = await self.agent.ai_handler.create_goal_plan(
+                        self.agent.artist_profile,
+                        goal,
+                        current_state
+                    )
+                    
+                    # Get next step
+                    step = await self.agent.ai_handler.get_next_step(
+                        plan.id,
+                        current_state
+                    )
+                    
+                    if step:
+                        # Notify user of planned action
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=f"🎯 Working on goal: {goal}\n\n"
+                                f"Next action: {step.action}\n"
+                                f"Priority: {'⭐' * step.priority}\n"
+                                f"Estimated duration: {step.estimated_duration}\n\n"
+                                "I'll keep you updated on the progress."
+                        )
+                        
+                        # Execute step
+                        result = await self.agent.ai_handler.execute_step(
+                            step,
+                            self.agent,
+                            {
+                                "profile": self.agent.artist_profile.dict(),
+                                "goal": goal,
+                                "plan": plan.dict()
+                            }
+                        )
+                        
+                        # Report result
+                        if result.success:
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text=f"✅ Action completed successfully!\n\n"
+                                    f"Action: {step.action}\n"
+                                    f"Result: {result.output.get('message', 'Completed')}\n\n"
+                                    "I'll continue working on the next steps."
+                            )
+                        else:
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text=f"❌ Action encountered an issue:\n\n"
+                                    f"Action: {step.action}\n"
+                                    f"Error: {result.output.get('error', 'Unknown error')}\n\n"
+                                    "I'll adjust my approach and try alternative steps."
+                            )
+                        
+                        # Check if goal is achieved
+                        if await self.agent.ai_handler._check_goal_achieved(goal, current_state):
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text=f"🎉 Goal achieved: {goal}\n\n"
+                                    "I'll now focus on your other goals or maintaining this achievement."
+                            )
+                    
+                # Wait before next iteration
+                await asyncio.sleep(60)  # Check every minute
+                
+        except Exception as e:
+            logger.error(f"Error in autonomous mode: {str(e)}")
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ Autonomous mode encountered an error and has been disabled.\n\n"
+                    f"Error: {str(e)}\n\n"
+                    "You can try re-enabling it with /auto."
+            )
+            self._auto_mode = False
 
     async def suggest_next_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /suggest command."""
         try:
-            action = await self.agent.suggest_action(
-                current_state=await self.agent.get_current_state(),
-                goals=self.agent.artist_profile.goals,
-                previous_actions=[]
+            # Get current state and goals
+            current_state = await self.agent.get_current_state()
+            goals = self.agent.artist_profile.goals
+            
+            # Create a plan for the most important goal
+            plan = await self.agent.ai_handler.create_goal_plan(
+                self.agent.artist_profile,
+                goals[0],
+                current_state
             )
             
-            await update.message.reply_text(
-                f"🤔 Suggested Action:\n\n"
-                f"Action: {action.action}\n"
-                f"Priority: {action.priority}/5\n"
-                f"Reasoning: {action.reasoning}\n\n"
-                f"Would you like me to execute this action?"
+            # Get next step
+            step = await self.agent.ai_handler.get_next_step(
+                plan.id,
+                current_state
             )
+            
+            if step:
+                # Create detailed suggestion message
+                suggestion = (
+                    f"🤔 Here's what I suggest:\n\n"
+                    f"Goal: {goals[0]}\n\n"
+                    f"Recommended action: {step.action}\n"
+                    f"Priority: {'⭐' * step.priority}\n"
+                    f"Estimated time: {step.estimated_duration}\n\n"
+                    f"This will help by:\n"
+                    f"• Moving us closer to your goal\n"
+                    f"• {step.success_criteria.get('impact', 'Improving your career progress')}\n\n"
+                    "Would you like me to execute this action? Use /auto to enable autonomous mode."
+                )
+                
+                await update.message.reply_text(suggestion)
+            else:
+                await update.message.reply_text(
+                    "I don't have any specific suggestions right now. "
+                    "This usually means we're on track with your current goals."
+                )
+                
         except Exception as e:
-            await update.message.reply_text(f"Error suggesting action: {str(e)}")
+            logger.error(f"Error suggesting action: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, I encountered an error while generating suggestions. "
+                "Please try again later."
+            )
 
     async def view_analytics(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /analytics command."""
@@ -953,25 +1085,21 @@ class ArtistManagerBot:
                 logger.error("Invalid token format")
                 raise ValueError("Invalid token format")
             
-            # Ensure persistence directory exists
-            persistence_dir = os.path.dirname("bot_persistence")
-            if persistence_dir:
-                os.makedirs(persistence_dir, exist_ok=True)
-            
             # Set up persistence with enhanced error handling
             persistence = None
             try:
                 # First try to load existing persistence file
-                if os.path.exists("bot_persistence"):
+                if os.path.exists(self.persistence_path):
                     logger.info("Found existing persistence file")
                 
                 persistence = PicklePersistence(
-                    filepath="bot_persistence",
+                    filepath=self.persistence_path,
                     single_file=True,
                     on_flush=True,
-                    update_interval=60
+                    update_interval=30  # More frequent updates
                 )
-                # Validate persistence by attempting to access key methods
+                
+                # Validate persistence
                 if not hasattr(persistence, 'get_user_data') or not hasattr(persistence, 'get_chat_data'):
                     raise ValueError("Invalid persistence object")
                 
@@ -980,16 +1108,16 @@ class ArtistManagerBot:
                 logger.error(f"Failed to initialize persistence: {e}", exc_info=True)
                 # Create a new persistence file if loading failed
                 try:
-                    if os.path.exists("bot_persistence"):
-                        backup_path = f"bot_persistence.bak.{int(datetime.now().timestamp())}"
-                        os.rename("bot_persistence", backup_path)
+                    if os.path.exists(self.persistence_path):
+                        backup_path = f"{self.persistence_path}.bak.{int(datetime.now().timestamp())}"
+                        os.rename(self.persistence_path, backup_path)
                         logger.info(f"Backed up corrupted persistence file to {backup_path}")
                     
                     persistence = PicklePersistence(
-                        filepath="bot_persistence",
+                        filepath=self.persistence_path,
                         single_file=True,
                         on_flush=True,
-                        update_interval=60
+                        update_interval=30
                     )
                     logger.info("Created new persistence file successfully")
                 except Exception as e2:
