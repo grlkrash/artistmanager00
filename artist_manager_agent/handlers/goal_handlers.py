@@ -10,7 +10,8 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
-    filters
+    filters,
+    BaseHandler
 )
 from ..models import Goal
 from .base_handler import BaseHandlerMixin

@@ -1,17 +1,22 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import os
 import logging
 from datetime import datetime
+from pathlib import Path
 
-from .team_management import TeamManager, PaymentRequest, PaymentMethod, PaymentStatus
-from .onboarding import OnboardingWizard
+from .models import ArtistProfile
+from .team_manager import TeamManager
+from .models import PaymentRequest, PaymentMethod, PaymentStatus
+from .handlers.onboarding_handlers import OnboardingHandlers
+from .bot_base import ArtistManagerBotBase
+from .persistence import RobustPersistence
 
 class ArtistManagerBot:
     def __init__(self):
         self.team_manager = TeamManager(team_id="default")  # Initialize with a default team ID
-        self.onboarding = OnboardingWizard(self)
+        self.onboarding = OnboardingHandlers(self)
         
     async def setup_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Configure payment preferences."""

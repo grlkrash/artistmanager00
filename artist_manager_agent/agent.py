@@ -16,17 +16,21 @@ import os
 import uuid
 import random
 from langchain.prompts import ChatPromptTemplate
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, ContextTypes
 
-from .team_management import TeamMember, CollaboratorRole
+from .models import CollaboratorRole
 from .integrations import ServiceManager, SupabaseIntegration, TelegramIntegration, AIMasteringIntegration
 from .blockchain import BlockchainManager, BlockchainConfig, NFTCollection, Token
 from .models import (
     Task, Event, Contract, FinancialRecord,
     PaymentRequest, PaymentStatus, PaymentMethod,
     Track, Release, ReleaseType, MasteringJob,
-    MasteringPreset, DistributionPlatform, ArtistProfile
+    MasteringPreset, DistributionPlatform, ArtistProfile,
+    CollaboratorProfile
 )
 from .ai_handler import AIHandler
+from .team_manager import TeamManager
 
 # Configure logging
 logger = logging.getLogger(__name__)

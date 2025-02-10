@@ -1,7 +1,7 @@
 """Blockchain functionality handlers for the Artist Manager Bot."""
 from typing import List
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply, CallbackQuery
 from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,

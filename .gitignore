@@ -174,3 +174,16 @@ api.json
 # TS Docs
 **/typescript/docs/
 docs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Bot persistence backups
+bot_persistence.bak.*
+*.bak

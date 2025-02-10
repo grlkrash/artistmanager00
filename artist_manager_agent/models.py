@@ -5,6 +5,11 @@ import uuid
 from enum import Enum
 from pathlib import Path
 
+class NetworkType(str, Enum):
+    """Blockchain network types."""
+    BASE_SEPOLIA = "base-sepolia"
+    BASE_MAINNET = "base-mainnet"
+
 class BaseModelWithId(BaseModel):
     """Base model with ID field and hash support."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier")
@@ -349,3 +354,17 @@ class BudgetEntry(BaseModelWithId):
     date: datetime
     description: str = ""
     metadata: Dict[str, Any] = {}
+
+class Goal(BaseModelWithId):
+    """Model for goal management."""
+    title: str
+    description: str
+    target_date: Optional[datetime]
+    priority: str  # "low", "medium", "high"
+    status: str  # "not_started", "in_progress", "completed"
+    user_id: Optional[int] = None
+    progress: int = 0  # 0-100
+    tasks: List[str] = []  # List of task IDs
+    metrics: Dict[str, Any] = {}
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
