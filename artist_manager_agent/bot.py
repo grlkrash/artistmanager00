@@ -844,19 +844,19 @@ class ArtistManagerBot:
 
     async def _process_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE, profile: ArtistProfile):
         """Process goals and generate tasks."""
-        goals = profile.goals if hasattr(profile, "goals") else []
+                    goals = profile.goals if hasattr(profile, "goals") else []
         settings = context.user_data.get("auto_settings", self._default_auto_settings)
         
-        for goal in goals:
+                    for goal in goals:
             try:
                 # Get current progress
                 progress = await self.ai_handler.analyze_goal_progress(goal, profile)
                 
                 if progress < 100:  # Goal not completed
-                    # Generate task suggestions
+                        # Generate task suggestions
                     tasks = await self.ai_handler.suggest_tasks_for_goal(goal, profile)
                     
-                    if tasks:
+                        if tasks:
                         # Filter based on AI level setting
                         ai_level = settings.get("ai_level", "balanced")
                         if ai_level == "conservative":
@@ -885,7 +885,7 @@ class ArtistManagerBot:
                                 "\n".join(f"• {task.title}" for task in tasks),
                                 reply_markup=InlineKeyboardMarkup(keyboard)
                             )
-            
+                    
             except Exception as e:
                 logger.error(f"Error processing goal {goal.title}: {str(e)}")
 
@@ -896,17 +896,17 @@ class ArtistManagerBot:
             notif_level = settings.get("notifications", "important")
             
             # Check projects
-            projects = await self.team_manager.get_projects()
-            for project in projects:
+                    projects = await self.team_manager.get_projects()
+                    for project in projects:
                 if project.end_date:
                     days_remaining = (project.end_date - datetime.now()).days
                     
                     if (days_remaining <= 7 and notif_level in ["all", "important"]) or \
                        (days_remaining <= 3 and notif_level == "minimal"):
-                        await update.message.reply_text(
-                            f"⚠️ Project Deadline Alert\n\n"
-                            f"Project: {project.title}\n"
-                            f"Deadline: {project.end_date.strftime('%Y-%m-%d')}\n"
+                            await update.message.reply_text(
+                                f"⚠️ Project Deadline Alert\n\n"
+                                f"Project: {project.title}\n"
+                                f"Deadline: {project.end_date.strftime('%Y-%m-%d')}\n"
                             f"Days remaining: {days_remaining}\n\n"
                             f"Use /projects to view details",
                             reply_markup=InlineKeyboardMarkup([[
@@ -932,8 +932,8 @@ class ArtistManagerBot:
                                 InlineKeyboardButton("View Task", callback_data=f"task_view_{task.id}")
                             ]])
                         )
-                        
-        except Exception as e:
+                
+            except Exception as e:
             logger.error(f"Error checking deadlines: {str(e)}")
 
     async def _analyze_metrics(self, update: Update, context: ContextTypes.DEFAULT_TYPE, profile: ArtistProfile):
