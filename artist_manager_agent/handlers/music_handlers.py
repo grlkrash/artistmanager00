@@ -41,6 +41,14 @@ AWAITING_DISTRIBUTION_TERRITORIES = "AWAITING_DISTRIBUTION_TERRITORIES"
 AWAITING_DISTRIBUTION_DATE = "AWAITING_DISTRIBUTION_DATE"
 AWAITING_DISTRIBUTION_PRICE = "AWAITING_DISTRIBUTION_PRICE"
 
+# Conversation states for promotion
+AWAITING_CAMPAIGN_TITLE = "AWAITING_CAMPAIGN_TITLE"
+AWAITING_CAMPAIGN_TYPE = "AWAITING_CAMPAIGN_TYPE"
+AWAITING_CAMPAIGN_PLATFORMS = "AWAITING_CAMPAIGN_PLATFORMS"
+AWAITING_CAMPAIGN_BUDGET = "AWAITING_CAMPAIGN_BUDGET"
+AWAITING_CAMPAIGN_START_DATE = "AWAITING_CAMPAIGN_START_DATE"
+AWAITING_CAMPAIGN_END_DATE = "AWAITING_CAMPAIGN_END_DATE"
+
 class MusicHandlers(BaseHandlerMixin):
     """Handlers for music-related functionality."""
     
@@ -59,7 +67,10 @@ class MusicHandlers(BaseHandlerMixin):
             self.get_release_conversation_handler(),
             self.get_mastering_conversation_handler(),
             self.get_distribution_conversation_handler(),
-            CallbackQueryHandler(self.handle_music_callback, pattern="^music_")
+            CallbackQueryHandler(self.handle_music_callback, pattern="^music_"),
+            CommandHandler("analytics", self.show_analytics),
+            CommandHandler("promotion", self.manage_promotion),
+            CommandHandler("newcampaign", self.start_promotion_campaign)
         ]
 
     def get_release_conversation_handler(self) -> ConversationHandler:
@@ -1037,5 +1048,335 @@ class MusicHandlers(BaseHandlerMixin):
             
         await update.message.reply_text(
             "Distribution setup cancelled. You can start over with /newdistribution"
+        )
+        return ConversationHandler.END
+
+    async def show_analytics(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show music analytics dashboard."""
+        try:
+            # Get all tracks
+            tracks = list(self.bot.music_services.tracks.values())
+            
+            if not tracks:
+                await update.message.reply_text(
+                    "No tracks found to analyze. Create a release first!"
+                )
+                return
+
+            # Get analytics for each track
+            analytics = []
+            for track in tracks:
+                # Get streaming stats
+                stats = await self.bot.music_services.get_streaming_stats(track.id)
+                
+                # Get playlist analytics
+                playlists = await self.bot.music_services.get_playlist_analytics(track.id)
+                
+                # Get demographics
+                demographics = await self.bot.music_services.get_audience_demographics(track.id)
+                
+                analytics.append({
+                    "track": track,
+                    "stats": stats,
+                    "playlists": playlists,
+                    "demographics": demographics
+                })
+                
+            # Create summary message
+            message = "📊 Music Analytics\n\n"
+            
+            for data in analytics:
+                track = data["track"]
+                stats = data["stats"]
+                playlists = data["playlists"]
+                demographics = data["demographics"]
+                
+                message += f"🎵 {track.title}\n"
+                
+                # Streaming stats
+                total_streams = sum(s.streams for s in stats)
+                total_revenue = sum(s.revenue for s in stats)
+                message += (
+                    f"Streams: {total_streams:,}\n"
+                    f"Revenue: ${total_revenue:,.2f}\n"
+                )
+                
+                # Playlist stats
+                message += (
+                    f"Playlists: {playlists['total_playlists']}\n"
+                    f"Playlist Streams: {playlists['total_streams_from_playlists']}\n"
+                )
+                
+                # Top countries
+                top_countries = sorted(
+                    demographics["top_countries"].items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:3]
+                message += "Top Countries: " + ", ".join(
+                    f"{country} ({streams:,})"
+                    for country, streams in top_countries
+                ) + "\n\n"
+                
+            # Add action buttons
+            keyboard = [
+                [
+                    InlineKeyboardButton("Detailed Stats", callback_data="music_analytics_detailed"),
+                    InlineKeyboardButton("Export Data", callback_data="music_analytics_export")
+                ],
+                [
+                    InlineKeyboardButton("Revenue Report", callback_data="music_analytics_revenue"),
+                    InlineKeyboardButton("Demographics", callback_data="music_analytics_demographics")
+                ],
+                [InlineKeyboardButton("Back to Music", callback_data="music_menu")]
+            ]
+            
+            await update.message.reply_text(
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+        except Exception as e:
+            logger.error(f"Error showing analytics: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error loading analytics. Please try again later."
+            )
+
+    async def manage_promotion(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle promotion campaigns."""
+        try:
+            # Get active campaigns
+            campaigns = list(self.bot.music_services.promotion_campaigns.values())
+            active_campaigns = [c for c in campaigns if c.end_date > datetime.now()]
+            
+            message = "🚀 Promotion Campaigns\n\n"
+            
+            if active_campaigns:
+                message += "Active Campaigns:\n"
+                for campaign in active_campaigns:
+                    message += (
+                        f"📈 {campaign.title}\n"
+                        f"Type: {campaign.type}\n"
+                        f"Budget: ${campaign.budget:,.2f}\n"
+                        f"Platforms: {', '.join(campaign.target_platforms)}\n"
+                        f"Status: {campaign.status}\n\n"
+                    )
+            else:
+                message += "No active campaigns.\n\n"
+                
+            # Add action buttons
+            keyboard = [
+                [
+                    InlineKeyboardButton("New Campaign", callback_data="music_promo_new"),
+                    InlineKeyboardButton("View History", callback_data="music_promo_history")
+                ],
+                [
+                    InlineKeyboardButton("Campaign Analytics", callback_data="music_promo_analytics"),
+                    InlineKeyboardButton("Best Practices", callback_data="music_promo_tips")
+                ],
+                [InlineKeyboardButton("Back to Music", callback_data="music_menu")]
+            ]
+            
+            await update.message.reply_text(
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+        except Exception as e:
+            logger.error(f"Error managing promotion: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error loading promotion data. Please try again later."
+            )
+
+    async def start_promotion_campaign(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Start promotion campaign creation."""
+        try:
+            # Initialize campaign data
+            context.user_data["creating_campaign"] = {
+                "id": str(uuid.uuid4())
+            }
+            
+            await update.message.reply_text(
+                "🚀 Let's create a new promotion campaign!\n\n"
+                "What's the title of your campaign?",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_CAMPAIGN_TITLE
+            
+        except Exception as e:
+            logger.error(f"Error starting campaign creation: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error starting campaign creation. Please try again."
+            )
+            return ConversationHandler.END
+
+    async def handle_campaign_title(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle campaign title input."""
+        title = update.message.text.strip()
+        context.user_data["creating_campaign"]["title"] = title
+        
+        # Show campaign type options
+        keyboard = [
+            ["Social Media", "Playlist Pitching"],
+            ["Press Release", "Influencer Outreach"],
+            ["Paid Ads", "Email Marketing"]
+        ]
+        
+        await update.message.reply_text(
+            f"What type of campaign is '{title}'?",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+        )
+        return AWAITING_CAMPAIGN_TYPE
+
+    async def handle_campaign_type(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle campaign type selection."""
+        campaign_type = update.message.text.strip().lower()
+        context.user_data["creating_campaign"]["type"] = campaign_type
+        
+        # Show platform options
+        keyboard = []
+        for platform in DistributionPlatform:
+            keyboard.append([
+                InlineKeyboardButton(
+                    platform.value.replace("_", " ").title(),
+                    callback_data=f"promo_platform_{platform.value}"
+                )
+            ])
+        keyboard.append([InlineKeyboardButton("Done", callback_data="promo_platforms_done")])
+        
+        await update.message.reply_text(
+            "Select the platforms to target:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return AWAITING_CAMPAIGN_PLATFORMS
+
+    async def handle_campaign_platforms(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle campaign platform selection."""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data == "promo_platforms_done":
+            if not context.user_data["creating_campaign"].get("platforms"):
+                await query.message.reply_text(
+                    "Please select at least one platform:"
+                )
+                return AWAITING_CAMPAIGN_PLATFORMS
+                
+            await query.message.reply_text(
+                "What's your budget for this campaign? (Enter amount in USD)",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_CAMPAIGN_BUDGET
+            
+        else:
+            platform = query.data.replace("promo_platform_", "")
+            if platform in [p.value for p in DistributionPlatform]:
+                platforms = context.user_data["creating_campaign"].get("platforms", [])
+                if platform in platforms:
+                    platforms.remove(platform)
+                    await query.message.edit_text(
+                        f"Removed {platform.replace('_', ' ').title()} from campaign"
+                    )
+                else:
+                    platforms.append(platform)
+                    await query.message.edit_text(
+                        f"Added {platform.replace('_', ' ').title()} to campaign"
+                    )
+                context.user_data["creating_campaign"]["platforms"] = platforms
+            return AWAITING_CAMPAIGN_PLATFORMS
+
+    async def handle_campaign_budget(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle campaign budget input."""
+        try:
+            budget = float(update.message.text.strip().replace("$", "").replace(",", ""))
+            context.user_data["creating_campaign"]["budget"] = budget
+            
+            await update.message.reply_text(
+                "When should the campaign start?\n"
+                "Enter the date in YYYY-MM-DD format:",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_CAMPAIGN_START_DATE
+            
+        except ValueError:
+            await update.message.reply_text(
+                "Please enter a valid number for the budget (e.g. 1000):"
+            )
+            return AWAITING_CAMPAIGN_BUDGET
+
+    async def handle_campaign_start_date(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle campaign start date input."""
+        try:
+            start_date = datetime.strptime(update.message.text.strip(), "%Y-%m-%d")
+            context.user_data["creating_campaign"]["start_date"] = start_date
+            
+            await update.message.reply_text(
+                "When should the campaign end?\n"
+                "Enter the date in YYYY-MM-DD format:",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_CAMPAIGN_END_DATE
+            
+        except ValueError:
+            await update.message.reply_text(
+                "Please enter a valid date in YYYY-MM-DD format:"
+            )
+            return AWAITING_CAMPAIGN_START_DATE
+
+    async def handle_campaign_end_date(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle campaign end date input and create campaign."""
+        try:
+            end_date = datetime.strptime(update.message.text.strip(), "%Y-%m-%d")
+            campaign_data = context.user_data.pop("creating_campaign")
+            
+            # Create campaign
+            campaign = await self.bot.music_services.create_promotion_campaign(
+                title=campaign_data["title"],
+                campaign_type=campaign_data["type"],
+                target_platforms=campaign_data["platforms"],
+                budget=campaign_data["budget"],
+                start_date=campaign_data["start_date"],
+                end_date=end_date
+            )
+            
+            # Show success message
+            keyboard = [
+                [
+                    InlineKeyboardButton("View Campaign", callback_data=f"music_promo_view_{campaign.id}"),
+                    InlineKeyboardButton("Edit Campaign", callback_data=f"music_promo_edit_{campaign.id}")
+                ],
+                [InlineKeyboardButton("Back to Promotion", callback_data="music_promo")]
+            ]
+            
+            await update.message.reply_text(
+                f"✨ Campaign '{campaign.title}' created successfully!\n\n"
+                f"Type: {campaign.type}\n"
+                f"Budget: ${campaign.budget:,.2f}\n"
+                f"Platforms: {', '.join(campaign.target_platforms)}\n"
+                f"Duration: {campaign.start_date.strftime('%Y-%m-%d')} to {campaign.end_date.strftime('%Y-%m-%d')}\n\n"
+                "What would you like to do next?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return ConversationHandler.END
+            
+        except ValueError:
+            await update.message.reply_text(
+                "Please enter a valid date in YYYY-MM-DD format:"
+            )
+            return AWAITING_CAMPAIGN_END_DATE
+        except Exception as e:
+            logger.error(f"Error creating campaign: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error creating your campaign. Please try again."
+            )
+            return ConversationHandler.END
+
+    async def cancel_campaign_creation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancel campaign creation."""
+        if "creating_campaign" in context.user_data:
+            context.user_data.pop("creating_campaign")
+            
+        await update.message.reply_text(
+            "Campaign creation cancelled. You can start over with /newcampaign"
         )
         return ConversationHandler.END 

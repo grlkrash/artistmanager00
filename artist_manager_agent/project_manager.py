@@ -3,7 +3,7 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import uuid
-from .models import Project, Task, CollaboratorProfile
+from .models import Project, Task, CollaboratorProfile, ResourceAllocation, BudgetEntry
 from .log import logger, log_error
 
 class ProjectManager:
@@ -14,6 +14,8 @@ class ProjectManager:
         self.projects = {}
         self.tasks = {}
         self.team_members = {}
+        self.resources: Dict[str, List[ResourceAllocation]] = {}
+        self.budget_entries: Dict[str, List[BudgetEntry]] = {}
 
     async def show_projects(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show all projects."""
@@ -470,4 +472,253 @@ class ProjectManager:
             logger.error(f"Error handling team action: {str(e)}")
             await update.callback_query.edit_message_text(
                 "Sorry, there was an error managing team members. Please try again."
-            ) 
+            )
+
+    async def allocate_resource(
+        self,
+        project_id: str,
+        resource_type: str,
+        amount: float,
+        unit: str,
+        start_date: datetime,
+        end_date: datetime,
+        cost: float = 0
+    ) -> ResourceAllocation:
+        """Allocate a resource to a project."""
+        if project_id not in self.projects:
+            raise ValueError(f"Project with ID {project_id} not found")
+            
+        allocation = ResourceAllocation(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            resource_type=resource_type,
+            amount=amount,
+            unit=unit,
+            start_date=start_date,
+            end_date=end_date,
+            status="allocated",
+            cost=cost
+        )
+        
+        if project_id not in self.resources:
+            self.resources[project_id] = []
+            
+        self.resources[project_id].append(allocation)
+        
+        # Add budget entry if there's a cost
+        if cost > 0:
+            await self.add_budget_entry(
+                project_id=project_id,
+                category=f"resource_{resource_type}",
+                amount=cost,
+                entry_type="planned",
+                description=f"Resource allocation: {resource_type} ({amount} {unit})"
+            )
+            
+        return allocation
+
+    async def get_resource_allocations(
+        self,
+        project_id: str,
+        resource_type: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> List[ResourceAllocation]:
+        """Get resource allocations for a project."""
+        if project_id not in self.projects:
+            raise ValueError(f"Project with ID {project_id} not found")
+            
+        allocations = self.resources.get(project_id, [])
+        
+        # Apply filters
+        if resource_type:
+            allocations = [a for a in allocations if a.resource_type == resource_type]
+        if start_date:
+            allocations = [a for a in allocations if a.end_date >= start_date]
+        if end_date:
+            allocations = [a for a in allocations if a.start_date <= end_date]
+            
+        return sorted(allocations, key=lambda x: x.start_date)
+
+    async def update_resource_allocation(
+        self,
+        project_id: str,
+        allocation_id: str,
+        updates: Dict[str, Any]
+    ) -> Optional[ResourceAllocation]:
+        """Update a resource allocation."""
+        if project_id not in self.projects:
+            raise ValueError(f"Project with ID {project_id} not found")
+            
+        allocations = self.resources.get(project_id, [])
+        for allocation in allocations:
+            if allocation.id == allocation_id:
+                # Update cost in budget if it changed
+                if "cost" in updates and updates["cost"] != allocation.cost:
+                    cost_diff = updates["cost"] - allocation.cost
+                    if cost_diff != 0:
+                        await self.add_budget_entry(
+                            project_id=project_id,
+                            category=f"resource_{allocation.resource_type}",
+                            amount=cost_diff,
+                            entry_type="actual",
+                            description=f"Resource cost adjustment: {allocation.resource_type}"
+                        )
+                        
+                # Update allocation
+                for key, value in updates.items():
+                    if hasattr(allocation, key):
+                        setattr(allocation, key, value)
+                return allocation
+                
+        return None
+
+    async def add_budget_entry(
+        self,
+        project_id: str,
+        category: str,
+        amount: float,
+        entry_type: str,
+        description: str = ""
+    ) -> BudgetEntry:
+        """Add a budget entry to a project."""
+        if project_id not in self.projects:
+            raise ValueError(f"Project with ID {project_id} not found")
+            
+        entry = BudgetEntry(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            category=category,
+            amount=amount,
+            entry_type=entry_type,
+            date=datetime.now(),
+            description=description
+        )
+        
+        if project_id not in self.budget_entries:
+            self.budget_entries[project_id] = []
+            
+        self.budget_entries[project_id].append(entry)
+        return entry
+
+    async def get_budget_entries(
+        self,
+        project_id: str,
+        category: Optional[str] = None,
+        entry_type: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> List[BudgetEntry]:
+        """Get budget entries for a project."""
+        if project_id not in self.projects:
+            raise ValueError(f"Project with ID {project_id} not found")
+            
+        entries = self.budget_entries.get(project_id, [])
+        
+        # Apply filters
+        if category:
+            entries = [e for e in entries if e.category == category]
+        if entry_type:
+            entries = [e for e in entries if e.entry_type == entry_type]
+        if start_date:
+            entries = [e for e in entries if e.date >= start_date]
+        if end_date:
+            entries = [e for e in entries if e.date <= end_date]
+            
+        return sorted(entries, key=lambda x: x.date)
+
+    async def get_budget_summary(
+        self,
+        project_id: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """Get budget summary for a project."""
+        if project_id not in self.projects:
+            raise ValueError(f"Project with ID {project_id} not found")
+            
+        entries = await self.get_budget_entries(
+            project_id=project_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        summary = {
+            "total_planned": 0,
+            "total_actual": 0,
+            "categories": {},
+            "variance": 0
+        }
+        
+        for entry in entries:
+            # Update totals
+            if entry.entry_type == "planned":
+                summary["total_planned"] += entry.amount
+            else:
+                summary["total_actual"] += entry.amount
+                
+            # Update category totals
+            if entry.category not in summary["categories"]:
+                summary["categories"][entry.category] = {
+                    "planned": 0,
+                    "actual": 0,
+                    "variance": 0
+                }
+                
+            if entry.entry_type == "planned":
+                summary["categories"][entry.category]["planned"] += entry.amount
+            else:
+                summary["categories"][entry.category]["actual"] += entry.amount
+                
+        # Calculate variances
+        summary["variance"] = summary["total_actual"] - summary["total_planned"]
+        for category in summary["categories"]:
+            summary["categories"][category]["variance"] = (
+                summary["categories"][category]["actual"] -
+                summary["categories"][category]["planned"]
+            )
+            
+        return summary
+
+    async def get_resource_utilization(
+        self,
+        project_id: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """Get resource utilization summary for a project."""
+        if project_id not in self.projects:
+            raise ValueError(f"Project with ID {project_id} not found")
+            
+        allocations = await self.get_resource_allocations(
+            project_id=project_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        utilization = {}
+        for allocation in allocations:
+            if allocation.resource_type not in utilization:
+                utilization[allocation.resource_type] = {
+                    "total_amount": 0,
+                    "total_cost": 0,
+                    "units": set(),
+                    "allocations": []
+                }
+                
+            utilization[allocation.resource_type]["total_amount"] += allocation.amount
+            utilization[allocation.resource_type]["total_cost"] += allocation.cost
+            utilization[allocation.resource_type]["units"].add(allocation.unit)
+            utilization[allocation.resource_type]["allocations"].append({
+                "amount": allocation.amount,
+                "unit": allocation.unit,
+                "start_date": allocation.start_date,
+                "end_date": allocation.end_date,
+                "status": allocation.status
+            })
+            
+        # Convert units sets to lists for JSON serialization
+        for resource_type in utilization:
+            utilization[resource_type]["units"] = list(utilization[resource_type]["units"])
+            
+        return utilization 
