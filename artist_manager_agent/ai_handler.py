@@ -272,4 +272,225 @@ class AIHandler:
                 "goal": goal,
                 "state": current_state
             })
-            return False 
+            return False
+
+    async def analyze_goal_progress(self, goal: str, profile: ArtistProfile) -> float:
+        """Analyze progress towards a specific goal."""
+        try:
+            # Format the prompt for goal analysis
+            prompt = {
+                "role": "system",
+                "content": f"Analyze progress towards the goal: {goal}\nProfile: {profile.json()}"
+            }
+            
+            # Get response from LLM
+            response = await self.llm.agenerate([prompt])
+            progress = float(response.generations[0][0].text.strip())
+            
+            return min(max(progress, 0), 100)  # Ensure between 0-100
+        except Exception as e:
+            log_error(e, {
+                "goal": goal,
+                "profile": profile.dict()
+            })
+            return 0.0
+
+    async def suggest_tasks_for_goal(self, goal: str, profile: ArtistProfile) -> List[Task]:
+        """Generate task suggestions for a goal."""
+        try:
+            # Format the prompt for task suggestions
+            prompt = {
+                "role": "system",
+                "content": f"Suggest tasks to achieve the goal: {goal}\nProfile: {profile.json()}"
+            }
+            
+            # Get response from LLM
+            response = await self.llm.agenerate([prompt])
+            tasks_data = json.loads(response.generations[0][0].text)
+            
+            # Convert to Task objects
+            tasks = []
+            for task_data in tasks_data:
+                task = Task(
+                    title=task_data["title"],
+                    description=task_data["description"],
+                    priority=task_data["priority"],
+                    due_date=datetime.fromisoformat(task_data["due_date"])
+                )
+                tasks.append(task)
+            
+            return tasks
+        except Exception as e:
+            log_error(e, {
+                "goal": goal,
+                "profile": profile.dict()
+            })
+            return []
+
+    async def analyze_metrics(self, profile: ArtistProfile) -> Dict[str, Any]:
+        """Analyze performance metrics across platforms."""
+        try:
+            metrics = {
+                "social_growth": 0.0,
+                "streaming_growth": 0.0,
+                "project_completion": 0.0,
+                "goal_progress": 0.0,
+                "insights": [],
+                "suggested_actions": []
+            }
+            
+            # Analyze social media growth
+            if profile.social_media:
+                for platform, handle in profile.social_media.items():
+                    growth = await self._analyze_social_platform(platform, handle)
+                    metrics["social_growth"] += growth
+                metrics["social_growth"] /= len(profile.social_media)
+            
+            # Analyze streaming performance
+            if profile.streaming_profiles:
+                for platform, url in profile.streaming_profiles.items():
+                    growth = await self._analyze_streaming_platform(platform, url)
+                    metrics["streaming_growth"] += growth
+                metrics["streaming_growth"] /= len(profile.streaming_profiles)
+            
+            # Generate insights
+            insights = await self._generate_metric_insights(metrics, profile)
+            metrics["insights"] = insights
+            
+            # Generate action suggestions
+            actions = await self._generate_action_suggestions(metrics, profile)
+            metrics["suggested_actions"] = actions
+            
+            return metrics
+        except Exception as e:
+            log_error(e, {
+                "profile": profile.dict()
+            })
+            return None
+
+    async def generate_insights(self, profile: ArtistProfile) -> Dict[str, List[str]]:
+        """Generate AI-powered insights and suggestions."""
+        try:
+            # Format the prompt for insights
+            prompt = {
+                "role": "system",
+                "content": f"Generate insights and suggestions for artist profile: {profile.json()}"
+            }
+            
+            # Get response from LLM
+            response = await self.llm.agenerate([prompt])
+            insights_data = json.loads(response.generations[0][0].text)
+            
+            return {
+                "career": insights_data.get("career_insights", []),
+                "marketing": insights_data.get("marketing_insights", []),
+                "performance": insights_data.get("performance_insights", []),
+                "suggestions": insights_data.get("suggested_actions", [])
+            }
+        except Exception as e:
+            log_error(e, {
+                "profile": profile.dict()
+            })
+            return {}
+
+    async def _analyze_social_platform(self, platform: str, handle: str) -> float:
+        """Analyze growth on a social media platform."""
+        try:
+            # Get historical data
+            history = await self._get_social_history(platform, handle)
+            if not history:
+                return 0.0
+            
+            # Calculate growth rate
+            current = history[-1]["followers"]
+            previous = history[-2]["followers"] if len(history) > 1 else current
+            growth = ((current - previous) / previous) * 100 if previous > 0 else 0
+            
+            return growth
+        except Exception as e:
+            log_error(e, {
+                "platform": platform,
+                "handle": handle
+            })
+            return 0.0
+
+    async def _analyze_streaming_platform(self, platform: str, url: str) -> float:
+        """Analyze growth on a streaming platform."""
+        try:
+            # Get historical data
+            history = await self._get_streaming_history(platform, url)
+            if not history:
+                return 0.0
+            
+            # Calculate growth rate
+            current = history[-1]["streams"]
+            previous = history[-2]["streams"] if len(history) > 1 else current
+            growth = ((current - previous) / previous) * 100 if previous > 0 else 0
+            
+            return growth
+        except Exception as e:
+            log_error(e, {
+                "platform": platform,
+                "url": url
+            })
+            return 0.0
+
+    async def _generate_metric_insights(self, metrics: Dict[str, Any], profile: ArtistProfile) -> List[str]:
+        """Generate insights based on metrics."""
+        try:
+            # Format the prompt for insights
+            prompt = {
+                "role": "system",
+                "content": f"Generate insights based on metrics: {json.dumps(metrics)}\nProfile: {profile.json()}"
+            }
+            
+            # Get response from LLM
+            response = await self.llm.agenerate([prompt])
+            insights = json.loads(response.generations[0][0].text)
+            
+            return insights
+        except Exception as e:
+            log_error(e, {
+                "metrics": metrics,
+                "profile": profile.dict()
+            })
+            return []
+
+    async def _generate_action_suggestions(self, metrics: Dict[str, Any], profile: ArtistProfile) -> List[Dict[str, Any]]:
+        """Generate action suggestions based on metrics."""
+        try:
+            # Format the prompt for suggestions
+            prompt = {
+                "role": "system",
+                "content": f"Suggest actions based on metrics: {json.dumps(metrics)}\nProfile: {profile.json()}"
+            }
+            
+            # Get response from LLM
+            response = await self.llm.agenerate([prompt])
+            suggestions = json.loads(response.generations[0][0].text)
+            
+            return suggestions
+        except Exception as e:
+            log_error(e, {
+                "metrics": metrics,
+                "profile": profile.dict()
+            })
+            return []
+
+    async def _get_social_history(self, platform: str, handle: str) -> List[Dict[str, Any]]:
+        """Get historical data for a social media platform."""
+        # This would integrate with social media APIs
+        # For now, return mock data
+        return [
+            {"date": "2024-01-01", "followers": 1000},
+            {"date": "2024-02-01", "followers": 1200}
+        ]
+
+    async def _get_streaming_history(self, platform: str, url: str) -> List[Dict[str, Any]]:
+        """Get historical data for a streaming platform."""
+        # This would integrate with streaming platform APIs
+        # For now, return mock data
+        return [
+            {"date": "2024-01-01", "streams": 5000},
+            {"date": "2024-02-01", "streams": 6000}
+        ] 
