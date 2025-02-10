@@ -122,4 +122,15 @@ class TaskManagerIntegration:
         
     async def suggest_next_tasks(self, goal_id: str) -> List[Task]:
         """Suggest the next tasks to focus on for a goal."""
-        return await self.task_manager.suggest_next_tasks(goal_id) 
+        return await self.task_manager.suggest_next_tasks(goal_id)
+        
+    async def get_goals_by_user(self, user_id: int) -> List[Goal]:
+        """Get all goals for a specific user."""
+        try:
+            # Filter goals by user_id from the task manager
+            goals = [goal for goal in self.task_manager.goals.values() 
+                    if hasattr(goal, 'user_id') and goal.user_id == user_id]
+            return goals
+        except Exception as e:
+            logger.error(f"Error getting goals for user {user_id}: {str(e)}")
+            return [] 

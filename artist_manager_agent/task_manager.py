@@ -31,6 +31,7 @@ class Goal:
     target_date: Optional[datetime]
     priority: str  # "low", "medium", "high"
     status: str  # "not_started", "in_progress", "completed"
+    user_id: Optional[int] = None
     progress: int = 0  # 0-100
     tasks: List[str] = None
     metrics: Dict = None
