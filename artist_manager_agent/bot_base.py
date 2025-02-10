@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ForceReply, Message
 from telegram.ext import (
     Application,
+    ApplicationBuilder,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -160,6 +161,14 @@ class ArtistManagerBotBase:
             backup_count=3
         )
         
+        # Initialize application with persistence
+        self.application = (
+            ApplicationBuilder()
+            .token(self.token)
+            .persistence(self.persistence)
+            .build()
+        )
+        
         # Initialize handler registry
         self.handler_registry = HandlerRegistry()
         
@@ -197,38 +206,46 @@ class ArtistManagerBotBase:
             self.handler_registry.register_handler(7, self.music_handlers)  # Music handlers
             self.handler_registry.register_handler(8, self.task_handlers)  # Task handlers
             
+            # Register all handlers with the application
+            for group, handler in sorted(self.handler_registry._handlers.items()):
+                handler.register_handlers(self.application)
+            
             logger.info("All handlers registered successfully")
             
         except Exception as e:
             logger.error(f"Error registering handlers: {str(e)}")
             raise
             
-    def register_handlers(self, application: Application) -> None:
-        """Register all handlers with the application."""
-        try:
-            self.handler_registry.register_all(application)
-            logger.info("All handlers registered with application")
-        except Exception as e:
-            logger.error(f"Error registering handlers with application: {str(e)}")
-            raise
-            
-    async def run(self):
+    async def start(self):
         """Start the bot."""
         try:
-            # Create application with persistence
-            builder = Application.builder()
-            builder.token(self.token)
-            builder.persistence(self.persistence)
-            application = builder.build()
+            # Load persistence data
+            await self.persistence.load()
             
-            # Register all handlers
-            self.register_handlers(application)
+            # Register handlers with application
+            self._register_handlers()
             
-            # Start the bot
-            await application.run_polling()
+            # Start application
+            await self.application.initialize()
+            await self.application.start()
+            await self.application.run_polling()
             
         except Exception as e:
-            logger.error(f"Error running bot: {str(e)}")
+            logger.error(f"Error starting bot: {str(e)}")
+            raise
+            
+    async def stop(self):
+        """Stop the bot."""
+        try:
+            # Save persistence data
+            await self.persistence.flush()
+            
+            # Stop application
+            await self.application.stop()
+            await self.application.shutdown()
+            
+        except Exception as e:
+            logger.error(f"Error stopping bot: {str(e)}")
             raise
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

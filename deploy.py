@@ -1,43 +1,46 @@
-"""Deployment script for the Artist Manager Bot."""
+"""Deploy script for the Artist Manager Bot."""
 import os
 import sys
-import logging
-import asyncio
 import signal
-from pathlib import Path
-from dotenv import load_dotenv
+import asyncio
+import logging
 from datetime import datetime
-
-from artist_manager_agent.models import ArtistProfile
+from pathlib import Path
 from artist_manager_agent.bot_main import ArtistManagerBot
-from artist_manager_agent.log import logger
+from artist_manager_agent.models import ArtistProfile
+from artist_manager_agent.log import logger, log_event, log_error
 
-# Load environment variables
-load_dotenv()
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
 def setup_directories():
-    """Create necessary directories for the bot."""
-    # Create data directory structure
-    data_dir = Path("data")
-    persistence_dir = data_dir / "bot_persistence"
-    backups_dir = persistence_dir / "backups"
+    """Create necessary directories if they don't exist."""
+    directories = [
+        "data",
+        "data/bot_persistence",
+        "data/bot_persistence/backups"
+    ]
     
-    # Create directories if they don't exist
-    for directory in [data_dir, persistence_dir, backups_dir]:
-        directory.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created directory: {directory}")
+    for directory in directories:
+        path = Path(directory)
+        if not path.exists():
+            path.mkdir(parents=True)
+            logger.info(f"Created directory: {directory}")
 
 async def shutdown(signal, loop, bot=None):
     """Cleanup tasks tied to the service's shutdown."""
     logger.info(f"Received exit signal {signal.name}")
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     
     if bot:
         logger.info("Stopping bot...")
         await bot.stop()
     
-    [task.cancel() for task in tasks]
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     logger.info(f"Cancelling {len(tasks)} outstanding tasks")
+    [task.cancel() for task in tasks]
     await asyncio.gather(*tasks, return_exceptions=True)
     loop.stop()
 
@@ -64,10 +67,10 @@ async def main():
             goals=[],
             strengths=[],
             areas_for_improvement=["Not specified"],
-            achievements=[],  # Empty list for achievements
-            social_media={},  # Empty dict for social media
-            streaming_profiles={},  # Empty dict for streaming profiles
-            brand_guidelines={  # Dict for brand guidelines
+            achievements=[],
+            social_media={},
+            streaming_profiles={},
+            brand_guidelines={
                 "description": "Default brand guidelines",
                 "colors": [],
                 "fonts": [],
@@ -81,7 +84,8 @@ async def main():
         bot = ArtistManagerBot(
             telegram_token=telegram_token,
             artist_profile=artist_profile,
-            openai_api_key=openai_api_key
+            openai_api_key=openai_api_key,
+            persistence_path="data/bot_persistence/bot_data.pickle"
         )
         
         # Get event loop
@@ -97,17 +101,15 @@ async def main():
         logger.info("Starting bot...")
         await bot.start()
         
+        # Run forever
+        loop.run_forever()
+        
     except Exception as e:
         logger.error(f"Error in main: {str(e)}")
-        raise
+        sys.exit(1)
     finally:
+        loop.close()
         logger.info("Shutdown complete.")
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Received keyboard interrupt")
-    except Exception as e:
-        logger.error(f"Fatal error: {str(e)}")
-        sys.exit(1) 
+    asyncio.run(main()) 

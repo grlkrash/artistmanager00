@@ -23,22 +23,14 @@ class ArtistManagerBot(ArtistManagerBotBase, GoalsMixin):
     ):
         """Initialize the bot with proper dependency order."""
         try:
-            # Initialize persistence first
-            self.persistence = RobustPersistence(
-                filepath=str(Path(persistence_path).resolve()),
-                backup_count=3
-            )
-            
-            # Initialize task manager with persistence
-            self.task_manager_integration = TaskManagerIntegration(self.persistence)
-            
             # Initialize base class and mixins
             super().__init__(
                 telegram_token=telegram_token,
                 artist_profile=artist_profile,
                 openai_api_key=openai_api_key,
                 model=model,
-                db_url=db_url
+                db_url=db_url,
+                persistence_path=persistence_path
             )
             
             logger.info("Bot initialized successfully")
@@ -51,20 +43,31 @@ class ArtistManagerBot(ArtistManagerBotBase, GoalsMixin):
         """Start the bot with proper initialization."""
         try:
             # Initialize persistence
-            await self._init_persistence()
+            await self.persistence.load()
+            await self.task_manager_integration.load_from_persistence()
             
             # Start the bot
-            await super().run()
+            await super().start()
             
         except Exception as e:
             logger.error(f"Error starting bot: {str(e)}")
             raise
             
-    async def _init_persistence(self):
-        """Initialize persistence and load data."""
+    async def stop(self):
+        """Stop the bot and cleanup."""
         try:
-            await self.persistence.load_data()
-            await self.task_manager_integration.load_from_persistence()
+            # Save persistence data
+            await self.persistence.flush()
+            await self.task_manager_integration.save_to_persistence()
+            
+            # Cleanup handlers
+            self.handler_registry.clear()
+            
+            # Stop the bot
+            await super().stop()
+            
+            logger.info("Bot stopped successfully")
+            
         except Exception as e:
-            logger.error(f"Error initializing persistence: {str(e)}")
+            logger.error(f"Error stopping bot: {str(e)}")
             raise 
