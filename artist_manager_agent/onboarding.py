@@ -9,27 +9,31 @@ from pydantic import BaseModel
 import random
 import re
 import logging
+from artist_manager_agent.log import logger
+from artist_manager_agent.models import ArtistProfile
 
-# Add manager name state
+# State definitions
 (
     AWAITING_NAME,
-    AWAITING_MANAGER_NAME,  # New state
+    AWAITING_MANAGER_NAME,
     AWAITING_GENRE,
     AWAITING_SUBGENRE,
     AWAITING_STYLE_DESCRIPTION,
     AWAITING_INFLUENCES,
     AWAITING_CAREER_STAGE,
     AWAITING_GOALS,
-    AWAITING_GOAL_TIMELINE,
+    AWAITING_GOALS_CONFIRMATION,
     AWAITING_STRENGTHS,
+    AWAITING_STRENGTHS_CONFIRMATION,
     AWAITING_IMPROVEMENTS,
+    AWAITING_IMPROVEMENTS_CONFIRMATION,
     AWAITING_ACHIEVEMENTS,
     AWAITING_SOCIAL_MEDIA,
     AWAITING_STREAMING_PROFILES,
     CONFIRM_PROFILE,
     EDIT_CHOICE,
-    EDIT_SECTION,
-) = range(17)  # Updated to 17 states
+    EDIT_SECTION
+) = range(19)  # Updated range for all states
 
 class ArtistContext(BaseModel):
     """Extended artist context for better guidance."""
@@ -42,11 +46,56 @@ class ArtistContext(BaseModel):
     production_preferences: Dict[str, Any] = {}
     manager_name: str = ""  # Add manager name field
 
+class StateManager:
+    """Manages conversation states and transitions."""
+    
+    def __init__(self):
+        self.active_states: Dict[int, str] = {}
+        self.state_history: Dict[int, List[str]] = {}
+        
+    async def transition_to(self, user_id: int, new_state: str) -> bool:
+        """
+        Attempt to transition to a new state.
+        Returns True if transition is allowed and successful.
+        """
+        current_state = self.active_states.get(user_id)
+        
+        # Log the attempted transition
+        logger.info(f"State transition attempt for user {user_id}: {current_state} -> {new_state}")
+        
+        # Initialize history if needed
+        if user_id not in self.state_history:
+            self.state_history[user_id] = []
+            
+        # Validate transition
+        if current_state == new_state:
+            logger.warning(f"Attempted transition to same state for user {user_id}: {new_state}")
+            return False
+            
+        # Update state
+        self.active_states[user_id] = new_state
+        self.state_history[user_id].append(new_state)
+        
+        logger.info(f"State transition successful for user {user_id}: {current_state} -> {new_state}")
+        return True
+        
+    def get_current_state(self, user_id: int) -> Optional[str]:
+        """Get the current state for a user."""
+        return self.active_states.get(user_id)
+        
+    def clear_state(self, user_id: int):
+        """Clear the state for a user."""
+        if user_id in self.active_states:
+            del self.active_states[user_id]
+        if user_id in self.state_history:
+            del self.state_history[user_id]
+
 class OnboardingWizard:
     def __init__(self, agent: Any):
         self.agent = agent
         self.temp_data: Dict[str, Any] = {}
         self._load_name_data()
+        self.state_manager = StateManager()
 
     def _load_name_data(self):
         """Load name components for generating manager names."""
@@ -67,20 +116,49 @@ class OnboardingWizard:
 
     async def start_onboarding(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Start the onboarding process."""
-        await update.message.reply_text(
-            "Let's get started with setting up your artist profile! "
-            "First, what's your artist name?"
-        )
-        return AWAITING_NAME
+        user_id = update.effective_user.id
+        logger.info(f"Starting onboarding for user {user_id}")
+        
+        # Clear any existing state
+        self.state_manager.clear_state(user_id)
+        
+        # Initialize first state
+        if await self.state_manager.transition_to(user_id, AWAITING_NAME):
+            await update.message.reply_text(
+                "Let's get started with setting up your artist profile! "
+                "First, what's your artist name?"
+            )
+            return AWAITING_NAME
+        else:
+            logger.error(f"Failed to initialize state for user {user_id}")
+            await update.message.reply_text(
+                "Sorry, I encountered an error starting the onboarding process. "
+                "Please try again with /start or /onboard."
+            )
+            return ConversationHandler.END
 
     async def handle_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the artist name input."""
+        user_id = update.effective_user.id
         name = update.message.text
-        context.user_data['name'] = name
-        await update.message.reply_text(
-            f"Great to meet you, {name}! What genre best describes your music?"
-        )
-        return AWAITING_GENRE
+        logger.info(f"Handling name input for user {user_id}: {name}")
+        
+        try:
+            context.user_data['name'] = name
+            logger.info(f"Saved name {name} for user {user_id}")
+            
+            await update.message.reply_text(
+                f"Great to meet you, {name}! What genre best describes your music?"
+            )
+            logger.info(f"Sent genre prompt to user {user_id}")
+            return AWAITING_GENRE
+            
+        except Exception as e:
+            logger.error(f"Error handling name for user {user_id}: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, I encountered an error processing your name. Please try again."
+            )
+            return AWAITING_NAME
 
     async def handle_genre(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the genre input."""
@@ -131,7 +209,7 @@ class OnboardingWizard:
             )
             return AWAITING_GOALS
             
-        context.user_data['goals'] = goals
+        context.user_data['temp_goals'] = goals
         
         # Show what was understood
         goals_str = "\n".join(f"• {goal}" for goal in goals)
@@ -141,26 +219,43 @@ class OnboardingWizard:
             "If yes, let's move on to your strengths.\n"
             "If no, please enter your goals again."
         )
-        
-        if update.message.text.lower() == 'no':
+        return AWAITING_GOALS_CONFIRMATION
+
+    async def handle_goals_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle confirmation of goals."""
+        if update.message.text.lower() == 'yes':
+            context.user_data['goals'] = context.user_data.pop('temp_goals')
+            await update.message.reply_text(
+                "Great! Now, what would you say are your strengths as an artist?\n"
+                "You can:\n"
+                "• List them one per line\n"
+                "• Separate them with commas\n"
+                "• Use bullet points\n\n"
+                "Example:\n"
+                "Strong vocal range\n"
+                "Experienced with live performances\n"
+                "Good at social media engagement"
+            )
+            return AWAITING_STRENGTHS
+        else:
+            await update.message.reply_text("Okay, please enter your goals again.")
             return AWAITING_GOALS
-            
-        await update.message.reply_text(
-            "Great! Now, what would you say are your strengths as an artist?\n"
-            "You can:\n"
-            "• List them one per line\n"
-            "• Separate them with commas\n"
-            "• Use bullet points\n\n"
-            "Example:\n"
-            "Strong vocal range\n"
-            "Experienced with live performances\n"
-            "Good at social media engagement"
-        )
-        return AWAITING_STRENGTHS
 
     async def handle_strengths(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the strengths input."""
+        user_id = update.effective_user.id
         text = update.message.text.strip()
+        
+        # Ensure we're in the correct state
+        current_state = self.state_manager.get_current_state(user_id)
+        if current_state != AWAITING_STRENGTHS:
+            logger.warning(f"Unexpected state for handle_strengths: {current_state}")
+            await update.message.reply_text(
+                "Sorry, there was a confusion in the conversation flow. "
+                "Let's start over with your strengths. What are your strengths as an artist?"
+            )
+            await self.state_manager.transition_to(user_id, AWAITING_STRENGTHS)
+            return AWAITING_STRENGTHS
         
         # Split by common separators and clean up
         strengths = [
@@ -183,88 +278,184 @@ class OnboardingWizard:
             )
             return AWAITING_STRENGTHS
             
-        context.user_data['strengths'] = strengths
+        context.user_data['temp_strengths'] = strengths
         
         # Show what was understood
         strengths_str = "\n".join(f"• {strength}" for strength in strengths)
-        await update.message.reply_text(
-            f"I understood these strengths:\n\n{strengths_str}\n\n"
-            "Is this correct? (yes/no)\n"
-            "If yes, let's move on to areas you'd like to improve.\n"
-            "If no, please enter your strengths again."
-        )
         
-        if update.message.text.lower() == 'no':
+        # Transition to confirmation state
+        if await self.state_manager.transition_to(user_id, AWAITING_STRENGTHS_CONFIRMATION):
+            await update.message.reply_text(
+                f"I understood these strengths:\n\n{strengths_str}\n\n"
+                "Is this correct? (yes/no)\n"
+                "If yes, let's move on to areas you'd like to improve.\n"
+                "If no, please enter your strengths again."
+            )
+            return AWAITING_STRENGTHS_CONFIRMATION
+        else:
+            logger.error(f"Failed to transition state for user {user_id}")
             return AWAITING_STRENGTHS
+
+    async def handle_strengths_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle confirmation of strengths."""
+        user_id = update.effective_user.id
+        response = update.message.text.lower()
+        
+        # Ensure we're in the correct state
+        current_state = self.state_manager.get_current_state(user_id)
+        if current_state != AWAITING_STRENGTHS_CONFIRMATION:
+            logger.warning(f"Unexpected state for handle_strengths_confirmation: {current_state}")
+            return current_state
+        
+        if response == 'yes':
+            context.user_data['strengths'] = context.user_data.pop('temp_strengths')
             
-        await update.message.reply_text(
-            "Great! Now, what areas would you like to improve?\n"
-            "You can:\n"
-            "• List them one per line\n"
-            "• Separate them with commas\n"
-            "• Use bullet points\n\n"
-            "Example:\n"
-            "Music theory knowledge\n"
-            "Studio recording techniques\n"
-            "Marketing strategy"
-        )
-        return AWAITING_IMPROVEMENTS
+            # Transition to improvements state
+            if await self.state_manager.transition_to(user_id, AWAITING_IMPROVEMENTS):
+                await update.message.reply_text(
+                    "Great! Now, what areas would you like to improve?\n"
+                    "You can:\n"
+                    "• List them one per line\n"
+                    "• Separate them with commas\n"
+                    "• Use bullet points\n\n"
+                    "Example:\n"
+                    "Music theory knowledge\n"
+                    "Studio recording techniques\n"
+                    "Marketing strategy"
+                )
+                return AWAITING_IMPROVEMENTS
+        else:
+            # Transition back to strengths input
+            if await self.state_manager.transition_to(user_id, AWAITING_STRENGTHS):
+                await update.message.reply_text("Okay, please enter your strengths again.")
+                return AWAITING_STRENGTHS
+        
+        logger.error(f"Failed to transition state for user {user_id}")
+        return current_state
 
     async def handle_improvements(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the improvements input."""
-        text = update.message.text.strip()
+        """Handle areas for improvement input."""
+        user_id = update.effective_user.id
+        user_input = update.message.text
         
-        # Split by common separators and clean up
-        improvements = [
-            improvement.strip()
-            for improvement in re.split(r'[,;\n•\-]', text)
-            if improvement.strip()
-        ]
+        # Ensure we're in the correct state
+        current_state = self.state_manager.get_current_state(user_id)
+        if current_state != AWAITING_IMPROVEMENTS:
+            logger.warning(f"Unexpected state for handle_improvements: {current_state}")
+            await update.message.reply_text(
+                "Sorry, there was a confusion in the conversation flow. "
+                "Let's start over with your areas for improvement."
+            )
+            await self.state_manager.transition_to(user_id, AWAITING_IMPROVEMENTS)
+            return AWAITING_IMPROVEMENTS
+        
+        # Store improvements temporarily
+        if "temp_improvements" not in context.user_data:
+            context.user_data["temp_improvements"] = []
+            
+        # Split input by commas and newlines
+        improvements = re.split(r'[,\n]', user_input)
+        improvements = [imp.strip() for imp in improvements if imp.strip()]
         
         if not improvements:
             await update.message.reply_text(
-                "I couldn't detect any areas for improvement. Please share what you'd like to improve.\n"
+                "I couldn't detect any areas for improvement. Please try again.\n"
                 "You can:\n"
                 "• List them one per line\n"
                 "• Separate them with commas\n"
-                "• Use bullet points\n\n"
-                "Example:\n"
-                "Music theory knowledge\n"
-                "Studio recording techniques\n"
-                "Marketing strategy"
+                "• Use bullet points"
             )
             return AWAITING_IMPROVEMENTS
-            
-        context.user_data['areas_for_improvement'] = improvements
         
-        # Show what was understood
-        improvements_str = "\n".join(f"• {improvement}" for improvement in improvements)
-        await update.message.reply_text(
-            f"I understood these areas for improvement:\n\n{improvements_str}\n\n"
-            "Is this correct? (yes/no)\n"
-            "If yes, let's move on to your achievements.\n"
-            "If no, please enter the areas again."
-        )
+        context.user_data["temp_improvements"] = improvements
         
-        if update.message.text.lower() == 'no':
+        # Transition to confirmation state
+        if await self.state_manager.transition_to(user_id, AWAITING_IMPROVEMENTS_CONFIRMATION):
+            # Show confirmation message
+            confirmation_text = (
+                "I understood these areas for improvement:\n\n"
+                + "\n".join(f"• {imp}" for imp in improvements)
+                + "\n\nIs this correct? (yes/no)\n"
+                + "If yes, let's move on to your achievements.\n"
+                + "If no, please enter the areas again."
+            )
+            await update.message.reply_text(confirmation_text)
+            return AWAITING_IMPROVEMENTS_CONFIRMATION
+        else:
+            logger.error(f"Failed to transition state for user {user_id}")
             return AWAITING_IMPROVEMENTS
+
+    async def handle_improvements_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle confirmation of improvements."""
+        user_id = update.effective_user.id
+        response = update.message.text.lower()
+        
+        # Ensure we're in the correct state
+        current_state = self.state_manager.get_current_state(user_id)
+        if current_state != AWAITING_IMPROVEMENTS_CONFIRMATION:
+            logger.warning(f"Unexpected state for handle_improvements_confirmation: {current_state}")
+            return current_state
+        
+        if response == "yes":
+            # Store confirmed improvements
+            context.user_data["improvements"] = context.user_data.get("temp_improvements", [])
             
-        await update.message.reply_text(
-            "Great! Now, what are your notable achievements?\n"
-            "You can:\n"
-            "• List them one per line\n"
-            "• Separate them with commas\n"
-            "• Use bullet points\n\n"
-            "Example:\n"
-            "Released debut EP in 2023\n"
-            "Performed at SXSW\n"
-            "100k+ streams on Spotify"
-        )
-        return AWAITING_ACHIEVEMENTS
+            # Clear temporary storage
+            if "temp_improvements" in context.user_data:
+                del context.user_data["temp_improvements"]
+            
+            # Transition to achievements state
+            if await self.state_manager.transition_to(user_id, AWAITING_ACHIEVEMENTS):
+                # Move to achievements
+                await update.message.reply_text(
+                    "Great! Now, what are your notable achievements?\n"
+                    "You can:\n"
+                    "• List them one per line\n"
+                    "• Separate them with commas\n"
+                    "• Use bullet points\n\n"
+                    "Example:\n"
+                    "Released debut EP in 2023\n"
+                    "Performed at SXSW\n"
+                    "100k+ streams on Spotify"
+                )
+                return AWAITING_ACHIEVEMENTS
+                
+        elif response == "no":
+            # Transition back to improvements input
+            if await self.state_manager.transition_to(user_id, AWAITING_IMPROVEMENTS):
+                await update.message.reply_text(
+                    "Okay, please enter your areas for improvement again.\n"
+                    "You can:\n"
+                    "• List them one per line\n"
+                    "• Separate them with commas\n"
+                    "• Use bullet points"
+                )
+                return AWAITING_IMPROVEMENTS
+                
+        else:
+            await update.message.reply_text(
+                "Please respond with 'yes' or 'no'."
+            )
+            return AWAITING_IMPROVEMENTS_CONFIRMATION
+            
+        logger.error(f"Failed to transition state for user {user_id}")
+        return current_state
 
     async def handle_achievements(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the achievements input."""
+        user_id = update.effective_user.id
         text = update.message.text.strip()
+        
+        # Ensure we're in the correct state
+        current_state = self.state_manager.get_current_state(user_id)
+        if current_state != AWAITING_ACHIEVEMENTS:
+            logger.warning(f"Unexpected state for handle_achievements: {current_state}")
+            await update.message.reply_text(
+                "Sorry, there was a confusion in the conversation flow. "
+                "Let's start over with your achievements."
+            )
+            await self.state_manager.transition_to(user_id, AWAITING_ACHIEVEMENTS)
+            return AWAITING_ACHIEVEMENTS
         
         # Split by common separators and clean up
         achievements = [
@@ -289,32 +480,28 @@ class OnboardingWizard:
             
         context.user_data['achievements'] = achievements
         
-        # Show what was understood
+        # Show what was understood and transition to social media
         achievements_str = "\n".join(f"• {achievement}" for achievement in achievements)
-        await update.message.reply_text(
-            f"I understood these achievements:\n\n{achievements_str}\n\n"
-            "Is this correct? (yes/no)\n"
-            "If yes, let's move on to your social media profiles.\n"
-            "If no, please enter your achievements again."
-        )
         
-        if update.message.text.lower() == 'no':
+        if await self.state_manager.transition_to(user_id, AWAITING_SOCIAL_MEDIA):
+            await update.message.reply_text(
+                f"I understood these achievements:\n\n{achievements_str}\n\n"
+                "Great! Now, let's add your social media profiles.\n"
+                "You can:\n"
+                "• Paste full profile URLs\n"
+                "• Use @handles (optionally followed by platform name)\n"
+                "• Use format 'platform - handle'\n"
+                "• Separate multiple profiles with commas or new lines\n\n"
+                "Example inputs:\n"
+                "https://instagram.com/artistname\n"
+                "@artistname twitter\n"
+                "instagram - @artistname\n"
+                "facebook: fb.com/artistpage"
+            )
+            return AWAITING_SOCIAL_MEDIA
+        else:
+            logger.error(f"Failed to transition state for user {user_id}")
             return AWAITING_ACHIEVEMENTS
-            
-        await update.message.reply_text(
-            "Great! Now, let's add your social media profiles.\n"
-            "You can:\n"
-            "• Paste full profile URLs\n"
-            "• Use @handles (optionally followed by platform name)\n"
-            "• Use format 'platform - handle'\n"
-            "• Separate multiple profiles with commas or new lines\n\n"
-            "Example inputs:\n"
-            "https://instagram.com/artistname\n"
-            "@artistname twitter\n"
-            "instagram - @artistname\n"
-            "facebook: fb.com/artistpage"
-        )
-        return AWAITING_SOCIAL_MEDIA
 
     async def handle_social_media(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the social media input."""
@@ -514,41 +701,75 @@ class OnboardingWizard:
         return "\n".join(summary)
 
     async def handle_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the profile confirmation."""
+        """Handle final profile confirmation."""
         if update.message.text.lower() == 'yes':
+            user_id = update.effective_user.id
+            
             # Create the artist profile
-            profile = self.agent.artist_profile
-            profile.name = context.user_data['name']
-            profile.genre = context.user_data['genre']
-            profile.career_stage = context.user_data['career_stage']
-            profile.goals = context.user_data['goals']
-            profile.strengths = context.user_data['strengths']
-            profile.areas_for_improvement = context.user_data['areas_for_improvement']
-            profile.achievements = context.user_data['achievements']
-            profile.social_media = context.user_data['social_media']
-            profile.streaming_profiles = context.user_data['streaming_profiles']
-            profile.updated_at = datetime.now()
-            
-            # Mark profile as confirmed
-            context.user_data['profile_confirmed'] = True
-            
-            await update.message.reply_text(
-                "Perfect! Your profile has been saved. You can now use /help to see available commands."
+            profile = ArtistProfile(
+                id=str(user_id),  # Use user_id as profile id
+                name=context.user_data.get('name', 'Artist'),
+                genre=context.user_data.get('genre', ''),
+                career_stage=context.user_data.get('career_stage', 'emerging'),
+                goals=context.user_data.get('goals', []),
+                strengths=context.user_data.get('strengths', []),
+                areas_for_improvement=context.user_data.get('improvements', []),
+                achievements=context.user_data.get('achievements', []),
+                social_media=context.user_data.get('social_media', {}),
+                streaming_profiles=context.user_data.get('streaming_profiles', {}),
+                brand_guidelines={}
             )
-            return ConversationHandler.END
+            
+            try:
+                # Save profile data to persistence
+                profile_dict = profile.dict()
+                context.user_data['profile_data'] = profile_dict
+                context.user_data['profile_confirmed'] = True
+                
+                # Update bot's profile storage
+                self.agent.set_user_profile(user_id, profile)
+                
+                # Save to bot's persistence
+                if not hasattr(self.agent.persistence.bot_data, 'profiles'):
+                    self.agent.persistence.bot_data['profiles'] = {}
+                self.agent.persistence.bot_data['profiles'][user_id] = profile_dict
+                
+                # Force persistence update
+                await self.agent.persistence.update_bot_data(self.agent.persistence.bot_data)
+                await self.agent.persistence._backup_data()
+                
+                logger.info(f"Profile confirmed and saved for user {user_id}")
+                
+                # Send welcome message with available commands
+                await update.message.reply_text(
+                    f"Great! Your profile has been saved. Welcome {profile.name}!\n\n"
+                    "Here are the commands you can use:\n"
+                    "/goals - View and manage your goals\n"
+                    "/tasks - View and manage your tasks\n"
+                    "/events - View and manage your events\n"
+                    "/contracts - View and manage your contracts\n"
+                    "/auto - Toggle autonomous mode\n"
+                    "/help - Show all available commands"
+                )
+                return ConversationHandler.END
+                
+            except Exception as e:
+                logger.error(f"Error saving profile for user {user_id}: {str(e)}")
+                await update.message.reply_text(
+                    "There was an error saving your profile. Please try again or contact support."
+                )
+                return ConversationHandler.END
+                
         else:
+            keyboard = [
+                ["Name", "Genre", "Career Stage"],
+                ["Goals", "Strengths", "Areas for Improvement"],
+                ["Achievements", "Social Media", "Streaming Profiles"]
+            ]
+            reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
             await update.message.reply_text(
-                "What would you like to edit?\n"
-                "1. Artist Name\n"
-                "2. Genre\n"
-                "3. Career Stage\n"
-                "4. Goals\n"
-                "5. Strengths\n"
-                "6. Areas for Improvement\n"
-                "7. Achievements\n"
-                "8. Social Media\n"
-                "9. Streaming Profiles\n"
-                "Please enter the number of the section you want to edit."
+                "What would you like to edit?",
+                reply_markup=reply_markup
             )
             return EDIT_CHOICE
 
@@ -645,30 +866,77 @@ class OnboardingWizard:
         await update.message.reply_text(prompt)
         return next_state
 
+    async def handle_edit_section(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle editing a specific section of the profile."""
+        choice = update.message.text.lower()
+        
+        # Map choices to states
+        choice_map = {
+            "name": AWAITING_NAME,
+            "genre": AWAITING_GENRE,
+            "career stage": AWAITING_CAREER_STAGE,
+            "goals": AWAITING_GOALS,
+            "strengths": AWAITING_STRENGTHS,
+            "areas for improvement": AWAITING_IMPROVEMENTS,
+            "achievements": AWAITING_ACHIEVEMENTS,
+            "social media": AWAITING_SOCIAL_MEDIA,
+            "streaming profiles": AWAITING_STREAMING_PROFILES
+        }
+        
+        if choice in choice_map:
+            await update.message.reply_text(f"Please enter your new {choice}:")
+            return choice_map[choice]
+        else:
+            await update.message.reply_text(
+                "Please select a valid section to edit:\n"
+                "• Name\n"
+                "• Genre\n"
+                "• Career Stage\n"
+                "• Goals\n"
+                "• Strengths\n"
+                "• Areas for Improvement\n"
+                "• Achievements\n"
+                "• Social Media\n"
+                "• Streaming Profiles"
+            )
+            return EDIT_CHOICE
+
+    async def cancel_onboarding(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancel the onboarding process."""
+        await update.message.reply_text(
+            "Onboarding cancelled. You can start again with /start or /onboard when you're ready."
+        )
+        return ConversationHandler.END
+
     def get_conversation_handler(self) -> ConversationHandler:
         """Get the conversation handler for the onboarding process."""
         return ConversationHandler(
-            entry_points=[CommandHandler("start", self.start_onboarding)],
+            entry_points=[
+                CommandHandler("start", self.start_onboarding),
+                CommandHandler("onboard", self.start_onboarding)
+            ],
             states={
                 AWAITING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_name)],
                 AWAITING_GENRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_genre)],
                 AWAITING_CAREER_STAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_career_stage)],
                 AWAITING_GOALS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_goals)],
+                AWAITING_GOALS_CONFIRMATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_goals_confirmation)],
                 AWAITING_STRENGTHS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_strengths)],
+                AWAITING_STRENGTHS_CONFIRMATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_strengths_confirmation)],
                 AWAITING_IMPROVEMENTS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_improvements)],
+                AWAITING_IMPROVEMENTS_CONFIRMATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_improvements_confirmation)],
                 AWAITING_ACHIEVEMENTS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_achievements)],
                 AWAITING_SOCIAL_MEDIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_social_media)],
                 AWAITING_STREAMING_PROFILES: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_streaming_profiles)],
                 CONFIRM_PROFILE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_confirmation)],
                 EDIT_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_edit_choice)],
+                EDIT_SECTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_edit_section)]
             },
             fallbacks=[
-                CommandHandler("cancel", lambda u, c: ConversationHandler.END),
-                CommandHandler("start", self.start_onboarding)  # Allow restarting
+                CommandHandler("cancel", self.cancel_onboarding),
+                CommandHandler("restart", self.start_onboarding)
             ],
             name="onboarding",
             persistent=True,
-            allow_reentry=True,  # Allow users to restart the conversation
-            per_chat=False,  # Use per-user persistence instead of per-chat
-            per_user=True  # Enable per-user conversation tracking
+            allow_reentry=True
         ) 

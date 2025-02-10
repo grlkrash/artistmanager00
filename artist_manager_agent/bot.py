@@ -39,9 +39,11 @@ from artist_manager_agent.onboarding import (
     AWAITING_INFLUENCES,
     AWAITING_CAREER_STAGE,
     AWAITING_GOALS,
-    AWAITING_GOAL_TIMELINE,
+    AWAITING_GOALS_CONFIRMATION,
     AWAITING_STRENGTHS,
+    AWAITING_STRENGTHS_CONFIRMATION,
     AWAITING_IMPROVEMENTS,
+    AWAITING_IMPROVEMENTS_CONFIRMATION,
     AWAITING_ACHIEVEMENTS,
     AWAITING_SOCIAL_MEDIA,
     AWAITING_STREAMING_PROFILES,
@@ -152,15 +154,21 @@ class ArtistManagerBot:
         persistence_dir.mkdir(exist_ok=True)
         (persistence_dir / "backups").mkdir(exist_ok=True)
         
-        # Initialize persistence with proper path
+        # Initialize persistence with proper path and sync
         persistence_path = str(persistence_dir / "persistence.pickle")
         self.persistence = RobustPersistence(
             filepath=persistence_path,
             backup_count=3
         )
         
+        # Ensure persistence is loaded
+        asyncio.create_task(self._init_persistence())
+        
+        # Store profiles by user ID with persistence backup
+        self.profiles: Dict[int, ArtistProfile] = {}
+        
         # Initialize default artist profile if none provided
-        self.artist_profile = artist_profile or ArtistProfile(
+        self.default_profile = artist_profile or ArtistProfile(
             id="default",
             name="Artist",
             genre="",
@@ -174,9 +182,9 @@ class ArtistManagerBot:
             brand_guidelines={}
         )
         
-        # Initialize agent with artist profile
+        # Initialize agent with default profile
         self.agent = ArtistManagerAgent(
-            artist_profile=self.artist_profile,
+            artist_profile=self.default_profile,
             openai_api_key=openai_api_key or os.getenv("OPENAI_API_KEY"),
             model=model,
             db_url=db_url
@@ -186,22 +194,44 @@ class ArtistManagerBot:
         self._is_running = False
         self._auto_mode = False
         
+    async def _init_persistence(self):
+        """Initialize persistence and load data."""
+        try:
+            await self.persistence.load_data()
+            # Load profiles from persistence
+            if hasattr(self.persistence, 'bot_data') and 'profiles' in self.persistence.bot_data:
+                self.profiles = self.persistence.bot_data['profiles']
+            logger.info("Persistence data loaded successfully")
+        except Exception as e:
+            logger.error(f"Error loading persistence: {str(e)}")
+            # Initialize empty state
+            self.persistence.bot_data = {'profiles': {}}
+            self.profiles = {}
+
+    def get_user_profile(self, user_id: int) -> ArtistProfile:
+        """Get the artist profile for a specific user."""
+        return self.profiles.get(user_id, self.default_profile)
+
+    def set_user_profile(self, user_id: int, profile: ArtistProfile):
+        """Set the artist profile for a specific user."""
+        self.profiles[user_id] = profile
+        # Update agent's profile if it's the current user
+        if self.agent and self.agent.artist_profile.id == str(user_id):
+            self.agent.artist_profile = profile
+
     def register_handlers(self, application: Application) -> None:
-        """Register all command handlers."""
-        # Register start command and onboarding handler in same group for proper coordination
-        application.add_handler(CommandHandler("start", self.start), group=1)
-        application.add_handler(self.onboarding.get_conversation_handler(), group=1)
+        """Register command handlers."""
+        # Register onboarding handler first with highest priority
+        application.add_handler(self.onboarding.get_conversation_handler(), group=0)
         
-        # Core commands with lower priority
-        application.add_handler(CommandHandler("help", self.help), group=2)
-        application.add_handler(CommandHandler("goals", self.goals), group=2)
-        application.add_handler(CommandHandler("tasks", self.tasks), group=2)
-        application.add_handler(CommandHandler("events", self.events), group=2)
-        application.add_handler(CommandHandler("contracts", self.contracts), group=2)
-        
-        # Auto mode and project handlers
-        application.add_handler(CommandHandler("auto", self.toggle_auto_mode), group=2)
-        application.add_handler(CommandHandler("newproject", self.create_project), group=2)
+        # Register other command handlers with lower priority
+        application.add_handler(CommandHandler("help", self.help), group=1)
+        application.add_handler(CommandHandler("goals", self.goals), group=1)
+        application.add_handler(CommandHandler("tasks", self.tasks), group=1)
+        application.add_handler(CommandHandler("events", self.events), group=1)
+        application.add_handler(CommandHandler("contracts", self.contracts), group=1)
+        application.add_handler(CommandHandler("auto", self.toggle_auto_mode), group=1)
+        application.add_handler(CommandHandler("newproject", self.create_project), group=1)
         
         # Error handler
         application.add_error_handler(self.error_handler)
@@ -212,29 +242,49 @@ class ArtistManagerBot:
             user_id = update.effective_user.id
             logger.info(f"Start command received from user {user_id}")
             
-            if not context.user_data.get("profile_confirmed"):
-                logger.info(f"Starting onboarding for user {user_id}")
-                await update.message.reply_text(
-                    "Welcome! Let's set up your artist profile. "
-                    "I'll ask you a series of questions to get to know you better."
-                )
-                return await self.onboarding.start_onboarding(update, context)
-            else:
-                logger.info(f"Showing dashboard for existing user {user_id}")
-                await update.message.reply_text(
-                    f"Welcome back! Here are your available commands:\n"
-                    f"/goals - View and manage your goals\n"
-                    f"/tasks - View and manage your tasks\n"
-                    f"/events - View and manage your events\n"
-                    f"/contracts - View and manage your contracts\n"
-                    f"/auto - Toggle autonomous mode\n"
-                    f"/help - Show all available commands"
-                )
+            # Ensure persistence is loaded
+            if not hasattr(self.persistence, 'user_data'):
+                await self._init_persistence()
+            
+            # Check if user has a profile in persistence
+            if context.user_data.get("profile_data"):
+                # Load existing profile
+                profile_data = context.user_data["profile_data"]
+                profile = ArtistProfile(**profile_data)
+                self.set_user_profile(user_id, profile)
+                logger.info(f"Loaded existing profile for user {user_id}")
+                
+                if not context.user_data.get("profile_confirmed"):
+                    # Profile exists but not confirmed - continue onboarding
+                    logger.info(f"Resuming onboarding for user {user_id}")
+                    await update.message.reply_text(
+                        "Welcome back! Let's continue setting up your artist profile."
+                    )
+                    return await self.onboarding.start_onboarding(update, context)
+                else:
+                    # Profile exists and confirmed - show dashboard
+                    logger.info(f"Showing dashboard for existing user {user_id}")
+                    await update.message.reply_text(
+                        f"Welcome back {profile.name}! Here are your available commands:\n"
+                        f"/goals - View and manage your goals\n"
+                        f"/tasks - View and manage your tasks\n"
+                        f"/events - View and manage your events\n"
+                        f"/contracts - View and manage your contracts\n"
+                        f"/auto - Toggle autonomous mode\n"
+                        f"/help - Show all available commands"
+                    )
+                    return ConversationHandler.END
+            
+            # No existing profile - start onboarding
+            logger.info(f"Starting new onboarding for user {user_id}")
+            return await self.onboarding.start_onboarding(update, context)
+                
         except Exception as e:
             logger.error(f"Error in start command for user {user_id}: {str(e)}")
             await update.message.reply_text(
                 "Sorry, I encountered an error. Please try again."
             )
+            return ConversationHandler.END
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /help command."""
@@ -611,37 +661,6 @@ class ArtistManagerBot:
 
     async def run(self):
         """Run the bot."""
-        try:
-            # Initialize application
-            application = Application.builder().token(self.token).persistence(self.persistence).build()
-            
-            # Register handlers
-            self.register_handlers(application)
-            
-            # Start the bot
-            logger.info("Starting bot with polling...")
-            await application.initialize()
-            await application.start()
-            await application.run_polling(allowed_updates=Update.ALL_TYPES)
-            
-        except Exception as e:
-            logger.error(f"Error in bot.run: {str(e)}")
-            raise
-        finally:
-            # Ensure proper cleanup
-            if 'application' in locals():
-                logger.info("Stopping application...")
-                await application.stop()
-                await application.shutdown()
-            logger.info("Bot shutdown complete.")
-
-    async def stop(self):
-        """Stop the bot gracefully."""
-        self._is_running = False
-        logger.info("Bot stop requested.")
-
-    async def run(self):
-        """Run the bot."""
         if not self.token:
             raise ValueError("Bot token not provided")
             
@@ -654,6 +673,16 @@ class ArtistManagerBot:
                 .token(self.token) \
                 .persistence(self.persistence) \
                 .build()
+
+            # Ensure persistence is loaded before starting
+            try:
+                await self._init_persistence()
+                logger.info("Persistence initialized successfully")
+            except Exception as e:
+                logger.error(f"Error initializing persistence: {str(e)}")
+                # Continue with empty state if persistence fails
+                self.persistence.bot_data = {'profiles': {}}
+                self.profiles = {}
 
             # Add handlers
             self.register_handlers(application)
@@ -671,15 +700,27 @@ class ArtistManagerBot:
             
             # Keep the bot running
             while self._is_running:
-                await asyncio.sleep(1)
+                try:
+                    # Periodic persistence backup
+                    await self.persistence._backup_data()
+                    await asyncio.sleep(300)  # Backup every 5 minutes
+                except Exception as e:
+                    logger.error(f"Error in main loop: {str(e)}")
+                    await asyncio.sleep(5)  # Short delay on error
                 
             # Cleanup
+            logger.info("Stopping bot...")
             await application.stop()
             await application.shutdown()
             
         except Exception as e:
-            logger.error(f"Error running bot: {str(e)}")
+            logger.error(f"Fatal error running bot: {str(e)}")
             self._is_running = False
             raise
         finally:
-            logger.info("Shutdown complete.") 
+            # Ensure final backup
+            try:
+                await self.persistence._backup_data()
+            except Exception as e:
+                logger.error(f"Error in final backup: {str(e)}")
+            logger.info("Bot shutdown complete") 
