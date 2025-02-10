@@ -12,47 +12,44 @@ class HandlerRegistry:
     
     def __init__(self):
         """Initialize the registry."""
-        self._handlers: Dict[str, BaseHandlerMixin] = {}
+        self._handlers: Dict[int, BaseHandlerMixin] = {}
         
-    def register_handler(self, name: str, handler: BaseHandlerMixin) -> None:
+    def register_handler(self, group: int, handler: BaseHandlerMixin) -> None:
         """Register a handler with the registry.
         
         Args:
-            name: Unique name for the handler
+            group: Integer group number for the handler
             handler: Handler instance to register
         """
         if not isinstance(handler, BaseHandlerMixin):
             raise TypeError(f"Handler must be an instance of BaseHandlerMixin, got {type(handler)}")
             
-        if name in self._handlers:
-            logger.warning(f"Overwriting existing handler: {name}")
+        if group in self._handlers:
+            logger.warning(f"Overwriting existing handler in group {group}")
             
-        self._handlers[name] = handler
-        logger.debug(f"Registered handler: {name}")
+        self._handlers[group] = handler
+        logger.debug(f"Registered handler in group {group}")
         
-    def get_handler(self, name: str) -> BaseHandlerMixin:
-        """Get a registered handler by name."""
-        return self._handlers.get(name)
+    def get_handler(self, group: int) -> BaseHandlerMixin:
+        """Get a registered handler by group number."""
+        return self._handlers.get(group)
         
     def register_all(self, application: Application) -> None:
         """Register all handlers with the application.
         
-        Handlers are registered in order of their group value (if specified).
+        Handlers are registered in order of their group number.
         """
         try:
-            # Sort handlers by group
-            sorted_handlers = sorted(
-                self._handlers.items(),
-                key=lambda x: getattr(x[1], 'group', 0) or 0
-            )
+            # Sort handlers by group number
+            sorted_handlers = sorted(self._handlers.items())
             
             # Register each handler
-            for name, handler in sorted_handlers:
+            for group, handler in sorted_handlers:
                 try:
                     handler.register_handlers(application)
-                    logger.debug(f"Registered handlers for: {name}")
+                    logger.debug(f"Registered handlers for group {group}")
                 except Exception as e:
-                    logger.error(f"Error registering handlers for {name}: {str(e)}")
+                    logger.error(f"Error registering handlers for group {group}: {str(e)}")
                     raise
                     
             logger.info("All handlers registered successfully")

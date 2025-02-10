@@ -54,7 +54,7 @@ AWAITING_TOKEN_DECIMALS = "AWAITING_TOKEN_DECIMALS"
 class BlockchainHandlers(BaseHandlerMixin):
     """Handlers for blockchain-related functionality."""
     
-    group = "blockchain"  # Handler group for registration
+    group = 3  # Handler group for registration
     
     def __init__(self, bot):
         self.bot = bot

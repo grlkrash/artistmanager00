@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 
 from artist_manager_agent.models import ArtistProfile
-from artist_manager_agent.bot import ArtistManagerBot
+from artist_manager_agent.bot_main import ArtistManagerBot
 from artist_manager_agent.log import logger
 
 # Load environment variables
@@ -95,7 +95,7 @@ async def main():
             )
             
         logger.info("Starting bot...")
-        await bot.run()
+        await bot.start()
         
     except Exception as e:
         logger.error(f"Error in main: {str(e)}")

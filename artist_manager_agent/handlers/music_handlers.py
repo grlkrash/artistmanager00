@@ -52,7 +52,7 @@ AWAITING_CAMPAIGN_END_DATE = "AWAITING_CAMPAIGN_END_DATE"
 class MusicHandlers(BaseHandlerMixin):
     """Handlers for music-related functionality."""
     
-    group = "music"  # Handler group for registration
+    group = 7  # Handler group for registration
     
     def __init__(self, bot):
         self.bot = bot
@@ -77,7 +77,7 @@ class MusicHandlers(BaseHandlerMixin):
         """Get the conversation handler for release creation."""
         return ConversationHandler(
             entry_points=[
-                CallbackQueryHandler(self.start_release_creation, pattern="^music_release_new$"),
+                CallbackQueryHandler(self.start_release_creation, pattern="^release_create$"),
                 CommandHandler("newrelease", self.start_release_creation)
             ],
             states={
@@ -94,7 +94,7 @@ class MusicHandlers(BaseHandlerMixin):
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_release_date)
                 ],
                 AWAITING_TRACK_UPLOAD: [
-                    MessageHandler(filters.AUDIO | filters.DOCUMENT, self.handle_track_upload)
+                    MessageHandler(filters.AUDIO | filters.Document.AUDIO, self.handle_track_upload)
                 ],
                 AWAITING_TRACK_TITLE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_track_title)
@@ -103,7 +103,7 @@ class MusicHandlers(BaseHandlerMixin):
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_track_genre)
                 ],
                 AWAITING_ARTWORK_UPLOAD: [
-                    MessageHandler(filters.PHOTO | filters.DOCUMENT, self.handle_artwork_upload)
+                    MessageHandler(filters.PHOTO | filters.Document.IMAGE, self.handle_artwork_upload)
                 ]
             },
             fallbacks=[
@@ -117,19 +117,18 @@ class MusicHandlers(BaseHandlerMixin):
         """Get the conversation handler for mastering."""
         return ConversationHandler(
             entry_points=[
-                CallbackQueryHandler(self.start_mastering, pattern="^music_master_new$"),
-                CommandHandler("newmaster", self.start_mastering)
+                CallbackQueryHandler(self.start_mastering, pattern="^master_start$"),
+                CommandHandler("master", self.start_mastering)
             ],
             states={
                 AWAITING_MASTER_TRACK: [
-                    MessageHandler(filters.AUDIO | filters.DOCUMENT, self.handle_master_track)
+                    MessageHandler(filters.AUDIO | filters.Document.AUDIO, self.handle_master_track)
                 ],
                 AWAITING_MASTER_PRESET: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_master_preset)
                 ],
                 AWAITING_REFERENCE_TRACK: [
-                    MessageHandler(filters.AUDIO | filters.DOCUMENT, self.handle_reference_track),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_reference_skip)
+                    MessageHandler(filters.AUDIO | filters.Document.AUDIO, self.handle_reference_track)
                 ],
                 AWAITING_TARGET_LOUDNESS: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_target_loudness)
@@ -143,11 +142,11 @@ class MusicHandlers(BaseHandlerMixin):
         )
 
     def get_distribution_conversation_handler(self) -> ConversationHandler:
-        """Get the conversation handler for distribution setup."""
+        """Get the conversation handler for distribution."""
         return ConversationHandler(
             entry_points=[
-                CallbackQueryHandler(self.start_distribution, pattern="^music_distribute_new$"),
-                CommandHandler("newdistribution", self.start_distribution)
+                CallbackQueryHandler(self.start_distribution, pattern="^distribute_start$"),
+                CommandHandler("distribute", self.start_distribution)
             ],
             states={
                 AWAITING_DISTRIBUTION_PLATFORMS: [
@@ -711,25 +710,6 @@ class MusicHandlers(BaseHandlerMixin):
             logger.error(f"Error handling reference track: {str(e)}")
             await update.message.reply_text(
                 "Sorry, there was an error processing your reference track. Please try again."
-            )
-            return AWAITING_REFERENCE_TRACK
-
-    async def handle_reference_skip(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-        """Handle skipping reference track."""
-        if update.message.text.lower() == "skip":
-            await update.message.reply_text(
-                "What's your target loudness in LUFS?\n"
-                "Common values:\n"
-                "• Streaming: -14 LUFS\n"
-                "• Club: -8 LUFS\n"
-                "• CD: -9 LUFS\n\n"
-                "Enter a number or type 'auto' for automatic detection:",
-                reply_markup=ForceReply(selective=True)
-            )
-            return AWAITING_TARGET_LOUDNESS
-        else:
-            await update.message.reply_text(
-                "Please send an audio file or type 'skip':"
             )
             return AWAITING_REFERENCE_TRACK
 

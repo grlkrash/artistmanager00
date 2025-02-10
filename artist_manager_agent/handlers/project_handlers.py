@@ -29,7 +29,7 @@ AWAITING_PROJECT_MILESTONES = "AWAITING_PROJECT_MILESTONES"
 class ProjectHandlers(BaseHandlerMixin):
     """Project management handlers."""
     
-    group = "projects"  # Handler group for registration
+    group = 2  # Handler group for registration
     
     def __init__(self, bot):
         self.bot = bot
@@ -381,53 +381,66 @@ class ProjectHandlers(BaseHandlerMixin):
             )
             return AWAITING_PROJECT_TIMELINE
 
-    async def handle_project_milestones(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle project milestones input."""
-        milestones = [m.strip() for m in update.message.text.split("\n") if m.strip()]
+    async def handle_project_team(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle project team input."""
+        team_members = update.message.text.split(',')
+        team_members = [member.strip() for member in team_members]
         
-        if not milestones:
-            await update.message.reply_text(
-                "Please enter at least one milestone, one per line:"
-            )
-            return AWAITING_PROJECT_MILESTONES
+        if not context.user_data.get('temp_project'):
+            context.user_data['temp_project'] = {}
             
-        # Create the project
-        project_id = str(uuid.uuid4())
-        project = Project(
-            id=project_id,
-            title=context.user_data["project_title"],
-            description=context.user_data["project_description"],
-            start_date=datetime.now(),
-            end_date=context.user_data["project_end_date"],
-            status="planning",
-            team_members=[],
-            budget=context.user_data["project_budget"],
-            milestones=milestones
-        )
-        
-        self.bot.project_manager.projects[project_id] = project
-        
-        # Clear conversation data
-        context.user_data.clear()
-        
-        # Show success message
-        keyboard = [
-            [
-                InlineKeyboardButton("Add Team Members", callback_data=f"project_team_{project_id}"),
-                InlineKeyboardButton("View Project", callback_data=f"project_manage_{project_id}")
-            ],
-            [InlineKeyboardButton("Back to Projects", callback_data="show_projects")]
-        ]
+        context.user_data['temp_project']['team'] = team_members
         
         await update.message.reply_text(
-            f"✨ Project '{project.title}' created successfully!\n\n"
-            f"Budget: ${project.budget:,.2f}\n"
-            f"Timeline: {project.start_date.date()} to {project.end_date.date()}\n\n"
-            "Milestones:\n" +
-            "\n".join(f"• {m}" for m in project.milestones) + "\n\n"
-            "What would you like to do next?",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            "Great! Now, let's set some milestones for the project.\n\n"
+            "Please enter the key milestones for this project, one per line.\n"
+            "For example:\n"
+            "- Initial planning (2 weeks)\n"
+            "- Development phase (1 month)\n"
+            "- Testing (2 weeks)\n"
+            "- Launch (1 week)"
         )
+        
+        return AWAITING_PROJECT_MILESTONES
+        
+    async def handle_project_milestones(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle project milestones input."""
+        milestones = update.message.text.split('\n')
+        milestones = [milestone.strip() for milestone in milestones if milestone.strip()]
+        
+        if not context.user_data.get('temp_project'):
+            context.user_data['temp_project'] = {}
+            
+        context.user_data['temp_project']['milestones'] = milestones
+        
+        # Create the project
+        project_data = context.user_data['temp_project']
+        new_project = Project(
+            id=str(uuid.uuid4()),
+            title=project_data['title'],
+            description=project_data['description'],
+            budget=project_data['budget'],
+            timeline=project_data['timeline'],
+            team=project_data['team'],
+            milestones=project_data['milestones'],
+            status="planning",
+            created_at=datetime.now(),
+            updated_at=datetime.now()
+        )
+        
+        # Save the project
+        self.bot.project_manager.add_project(new_project)
+        
+        # Clear temporary data
+        context.user_data.pop('temp_project', None)
+        
+        # Show confirmation
+        await update.message.reply_text(
+            f"✅ Project '{new_project.title}' has been created successfully!\n\n"
+            f"Use /projects to view and manage your projects.",
+            parse_mode="Markdown"
+        )
+        
         return ConversationHandler.END
 
     async def cancel_project_creation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

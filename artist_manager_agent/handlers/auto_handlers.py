@@ -27,7 +27,7 @@ AWAITING_NOTIFICATIONS = "AWAITING_NOTIFICATIONS"
 class AutoHandlers(BaseHandlerMixin):
     """Auto mode handlers."""
     
-    group = "auto"  # Handler group for registration
+    group = 5  # Handler group for registration (changed from "auto" to integer)
     
     def __init__(self, bot):
         self.bot = bot
@@ -73,7 +73,8 @@ class AutoHandlers(BaseHandlerMixin):
                 CommandHandler("cancel", self.cancel_auto_setup)
             ],
             name="auto_setup",
-            persistent=True
+            persistent=True,
+            per_message=True  # Added per_message=True
         )
 
     async def show_options(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -302,4 +303,111 @@ class AutoHandlers(BaseHandlerMixin):
         await update.message.reply_text(
             "Auto mode setup cancelled. You can start over with /autosetup"
         )
-        return ConversationHandler.END 
+        return ConversationHandler.END
+
+    async def handle_frequency(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle frequency input."""
+        try:
+            text = update.message.text.strip()
+            if text.isdigit():
+                hours = int(text)
+                if 1 <= hours <= 24:
+                    context.user_data["auto_settings"]["frequency"] = hours * 3600
+                    
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("Conservative", callback_data="auto_ai_conservative"),
+                            InlineKeyboardButton("Balanced", callback_data="auto_ai_balanced"),
+                            InlineKeyboardButton("Proactive", callback_data="auto_ai_proactive")
+                        ]
+                    ]
+                    
+                    await update.message.reply_text(
+                        "Great! Now select the AI proactiveness level:",
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                    return AWAITING_AI_LEVEL
+                    
+            await update.message.reply_text(
+                "Please enter a valid number of hours between 1 and 24:"
+            )
+            return AWAITING_FREQUENCY
+            
+        except Exception as e:
+            logger.error(f"Error handling frequency: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error processing your input. Please try again."
+            )
+            return ConversationHandler.END
+
+    async def handle_ai_level(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle AI level selection."""
+        try:
+            level = update.message.text.lower()
+            if level in ["conservative", "balanced", "proactive"]:
+                context.user_data["auto_settings"]["ai_level"] = level
+                
+                keyboard = [
+                    [
+                        InlineKeyboardButton("All", callback_data="auto_notif_all"),
+                        InlineKeyboardButton("Important Only", callback_data="auto_notif_important"),
+                        InlineKeyboardButton("Minimal", callback_data="auto_notif_minimal")
+                    ]
+                ]
+                
+                await update.message.reply_text(
+                    "Perfect! Finally, choose your notification preferences:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                return AWAITING_NOTIFICATIONS
+                
+            await update.message.reply_text(
+                "Please select one of: conservative, balanced, or proactive"
+            )
+            return AWAITING_AI_LEVEL
+            
+        except Exception as e:
+            logger.error(f"Error handling AI level: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error processing your input. Please try again."
+            )
+            return ConversationHandler.END
+
+    async def handle_notifications(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle notification preferences."""
+        try:
+            level = update.message.text.lower()
+            if level in ["all", "important", "minimal"]:
+                context.user_data["auto_settings"]["notifications"] = level
+                
+                # Save settings
+                settings = context.user_data["auto_settings"]
+                
+                keyboard = [
+                    [
+                        InlineKeyboardButton("Enable Auto Mode", callback_data="auto_enable"),
+                        InlineKeyboardButton("View Settings", callback_data="auto_status")
+                    ]
+                ]
+                
+                await update.message.reply_text(
+                    "✅ Auto mode configuration complete!\n\n"
+                    f"• Check frequency: Every {settings['frequency']//3600}h\n"
+                    f"• AI proactiveness: {settings['ai_level'].title()}\n"
+                    f"• Notifications: {settings['notifications'].title()}\n\n"
+                    "What would you like to do next?",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                return ConversationHandler.END
+                
+            await update.message.reply_text(
+                "Please select one of: all, important, or minimal"
+            )
+            return AWAITING_NOTIFICATIONS
+            
+        except Exception as e:
+            logger.error(f"Error handling notifications: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error processing your input. Please try again."
+            )
+            return ConversationHandler.END 

@@ -30,7 +30,7 @@ AWAITING_PAYMENT_DESCRIPTION = "AWAITING_PAYMENT_DESCRIPTION"
 class TeamHandlers(BaseHandlerMixin):
     """Team management handlers."""
     
-    group = "team"  # Handler group for registration
+    group = 6  # Handler group for registration
     
     def __init__(self, bot):
         self.bot = bot
@@ -425,4 +425,63 @@ class TeamHandlers(BaseHandlerMixin):
         await update.message.reply_text(
             "Action cancelled. You can use /team to view your team or /addmember to add a new member."
         )
+        return ConversationHandler.END
+
+    async def handle_payment_amount(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle payment amount input."""
+        try:
+            amount = float(update.message.text.strip().replace("$", "").replace(",", ""))
+            
+            if not context.user_data.get('temp_payment'):
+                context.user_data['temp_payment'] = {}
+                
+            context.user_data['temp_payment']['amount'] = amount
+            
+            await update.message.reply_text(
+                "Please provide a description for this payment:",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_PAYMENT_DESCRIPTION
+            
+        except ValueError:
+            await update.message.reply_text(
+                "Please enter a valid amount (e.g. 1000 or 1000.50):"
+            )
+            return AWAITING_PAYMENT_AMOUNT
+            
+    async def handle_payment_description(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle payment description input."""
+        description = update.message.text.strip()
+        
+        if not context.user_data.get('temp_payment'):
+            context.user_data['temp_payment'] = {}
+            
+        context.user_data['temp_payment']['description'] = description
+        
+        # Create payment request
+        payment_data = context.user_data['temp_payment']
+        payment_request = PaymentRequest(
+            id=str(uuid.uuid4()),
+            amount=payment_data['amount'],
+            description=payment_data['description'],
+            status="pending",
+            created_at=datetime.now(),
+            updated_at=datetime.now()
+        )
+        
+        # Save payment request
+        self.bot.team_manager.add_payment_request(payment_request)
+        
+        # Clear temporary data
+        context.user_data.pop('temp_payment', None)
+        
+        # Show confirmation
+        await update.message.reply_text(
+            f"✅ Payment request for ${payment_request.amount:,.2f} has been created.\n\n"
+            f"Description: {payment_request.description}\n"
+            f"Status: {payment_request.status.title()}\n\n"
+            "Use /payments to view and manage payments.",
+            parse_mode="Markdown"
+        )
+        
         return ConversationHandler.END 

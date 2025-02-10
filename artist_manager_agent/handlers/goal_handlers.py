@@ -27,7 +27,7 @@ AWAITING_GOAL_DATE = "AWAITING_GOAL_DATE"
 class GoalHandlers(BaseHandlerMixin):
     """Goal management handlers."""
     
-    group = "goals"  # Handler group for registration
+    group = 1  # Handler group for registration
     
     def __init__(self, bot):
         self.bot = bot

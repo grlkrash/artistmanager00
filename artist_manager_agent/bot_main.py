@@ -32,10 +32,6 @@ class ArtistManagerBot(ArtistManagerBotBase, GoalsMixin):
             # Initialize task manager with persistence
             self.task_manager_integration = TaskManagerIntegration(self.persistence)
             
-            # Load persisted data
-            self.persistence.load_data()
-            self.task_manager_integration.load_from_persistence()
-            
             # Initialize base class and mixins
             super().__init__(
                 telegram_token=telegram_token,

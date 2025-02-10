@@ -27,7 +27,7 @@ AWAITING_TASK_DUE_DATE = "AWAITING_TASK_DUE_DATE"
 class TaskHandlers(BaseHandlerMixin):
     """Task management handlers."""
     
-    group = "tasks"  # Handler group for registration
+    group = 8  # Handler group for registration
     
     def __init__(self, bot):
         self.bot = bot

@@ -84,7 +84,7 @@ class StateManager:
 class OnboardingHandlers(BaseHandlerMixin):
     """Handlers for onboarding process."""
     
-    group = "onboarding"  # Handler group for registration
+    group = 4  # Handler group for registration
     
     def __init__(self, bot):
         self.bot = bot
