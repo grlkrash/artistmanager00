@@ -576,4 +576,466 @@ class MusicHandlers(BaseHandlerMixin):
         await update.message.reply_text(
             "Release creation cancelled. You can start over with /newrelease"
         )
+        return ConversationHandler.END
+
+    async def start_mastering(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Start mastering flow."""
+        try:
+            # Initialize mastering data
+            context.user_data["mastering_job"] = {
+                "id": str(uuid.uuid4())
+            }
+            
+            await update.message.reply_text(
+                "🎚 Let's master your track!\n\n"
+                "Send me the audio file you want to master:",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_MASTER_TRACK
+            
+        except Exception as e:
+            logger.error(f"Error starting mastering: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error starting mastering. Please try again."
+            )
+            return ConversationHandler.END
+
+    async def handle_master_track(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle master track upload."""
+        try:
+            file = update.message.audio or update.message.document
+            if not file:
+                await update.message.reply_text(
+                    "Please send an audio file in a supported format (WAV preferred):"
+                )
+                return AWAITING_MASTER_TRACK
+                
+            # Save file info
+            file_info = await file.get_file()
+            file_path = Path(f"uploads/masters/{file.file_id}")
+            await file_info.download(file_path)
+            
+            context.user_data["mastering_job"]["track_path"] = file_path
+            
+            # Show preset options
+            keyboard = [
+                [
+                    InlineKeyboardButton("Balanced", callback_data="master_preset_balanced"),
+                    InlineKeyboardButton("Warm", callback_data="master_preset_warm")
+                ],
+                [
+                    InlineKeyboardButton("Bright", callback_data="master_preset_bright"),
+                    InlineKeyboardButton("Aggressive", callback_data="master_preset_aggressive")
+                ],
+                [
+                    InlineKeyboardButton("Bass Heavy", callback_data="master_preset_bass_heavy"),
+                    InlineKeyboardButton("Vocal Focus", callback_data="master_preset_vocal_focus")
+                ]
+            ]
+            
+            await update.message.reply_text(
+                "Choose a mastering preset that best fits your track:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_MASTER_PRESET
+            
+        except Exception as e:
+            logger.error(f"Error handling master track: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error processing your track. Please try again."
+            )
+            return AWAITING_MASTER_TRACK
+
+    async def handle_master_preset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle mastering preset selection."""
+        query = update.callback_query
+        await query.answer()
+        
+        preset = query.data.replace("master_preset_", "")
+        if preset not in [p.value for p in MasteringPreset]:
+            await query.message.reply_text(
+                "Please select a valid mastering preset"
+            )
+            return AWAITING_MASTER_PRESET
+            
+        context.user_data["mastering_job"]["preset"] = preset
+        
+        await query.message.reply_text(
+            "Would you like to upload a reference track?\n\n"
+            "A reference track helps achieve a similar sound.\n"
+            "Send an audio file, or type 'skip' to continue:",
+            reply_markup=ForceReply(selective=True)
+        )
+        return AWAITING_REFERENCE_TRACK
+
+    async def handle_reference_track(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle reference track upload."""
+        try:
+            file = update.message.audio or update.message.document
+            if not file:
+                await update.message.reply_text(
+                    "Please send an audio file or type 'skip':"
+                )
+                return AWAITING_REFERENCE_TRACK
+                
+            # Save file info
+            file_info = await file.get_file()
+            file_path = Path(f"uploads/references/{file.file_id}")
+            await file_info.download(file_path)
+            
+            context.user_data["mastering_job"]["reference_path"] = file_path
+            
+            await update.message.reply_text(
+                "What's your target loudness in LUFS?\n"
+                "Common values:\n"
+                "• Streaming: -14 LUFS\n"
+                "• Club: -8 LUFS\n"
+                "• CD: -9 LUFS\n\n"
+                "Enter a number or type 'auto' for automatic detection:",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_TARGET_LOUDNESS
+            
+        except Exception as e:
+            logger.error(f"Error handling reference track: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error processing your reference track. Please try again."
+            )
+            return AWAITING_REFERENCE_TRACK
+
+    async def handle_reference_skip(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle skipping reference track."""
+        if update.message.text.lower() == "skip":
+            await update.message.reply_text(
+                "What's your target loudness in LUFS?\n"
+                "Common values:\n"
+                "• Streaming: -14 LUFS\n"
+                "• Club: -8 LUFS\n"
+                "• CD: -9 LUFS\n\n"
+                "Enter a number or type 'auto' for automatic detection:",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_TARGET_LOUDNESS
+        else:
+            await update.message.reply_text(
+                "Please send an audio file or type 'skip':"
+            )
+            return AWAITING_REFERENCE_TRACK
+
+    async def handle_target_loudness(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle target loudness input and start mastering."""
+        try:
+            loudness_input = update.message.text.strip().lower()
+            
+            if loudness_input == "auto":
+                target_loudness = None
+            else:
+                try:
+                    target_loudness = float(loudness_input)
+                except ValueError:
+                    await update.message.reply_text(
+                        "Please enter a valid number or type 'auto':"
+                    )
+                    return AWAITING_TARGET_LOUDNESS
+            
+            # Create mastering job
+            job_data = context.user_data.pop("mastering_job")
+            job = MasteringJob(
+                track=Track(
+                    title="Master",  # Temporary title
+                    artist="",  # Will be set from profile
+                    file_path=job_data["track_path"],
+                    genre="",  # Will be detected
+                    release_date=datetime.now()
+                ),
+                preset=MasteringPreset(job_data["preset"]),
+                reference_track=job_data.get("reference_path"),
+                target_loudness=target_loudness
+            )
+            
+            # Submit for mastering
+            result = await self.bot.music_services.submit_for_mastering(job)
+            
+            # Show processing message
+            keyboard = [
+                [
+                    InlineKeyboardButton("Check Status", callback_data=f"music_master_status_{result['job_id']}"),
+                    InlineKeyboardButton("Cancel", callback_data=f"music_master_cancel_{result['job_id']}")
+                ]
+            ]
+            
+            await update.message.reply_text(
+                "🎚 Mastering in progress!\n\n"
+                "Your track is being processed with:\n"
+                f"• Preset: {job.preset.value.title()}\n"
+                f"• Target Loudness: {job.target_loudness or 'Auto'} LUFS\n"
+                f"• Reference Track: {'Yes' if job.reference_track else 'No'}\n\n"
+                "I'll notify you when it's ready!",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return ConversationHandler.END
+            
+        except Exception as e:
+            logger.error(f"Error handling target loudness: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error starting the mastering process. Please try again."
+            )
+            return ConversationHandler.END
+
+    async def cancel_mastering(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancel mastering process."""
+        if "mastering_job" in context.user_data:
+            # Clean up any uploaded files
+            job_data = context.user_data.pop("mastering_job")
+            for key in ["track_path", "reference_path"]:
+                if key in job_data and job_data[key].exists():
+                    job_data[key].unlink()
+                    
+        await update.message.reply_text(
+            "Mastering cancelled. You can start over with /newmaster"
+        )
+        return ConversationHandler.END
+
+    async def start_distribution(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Start distribution setup flow."""
+        try:
+            # Initialize distribution data
+            context.user_data["distributing_release"] = {
+                "id": str(uuid.uuid4()),
+                "platforms": [],
+                "territories": []
+            }
+            
+            # Show platform options
+            keyboard = []
+            for platform in DistributionPlatform:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        platform.value.replace("_", " ").title(),
+                        callback_data=f"distribute_platform_{platform.value}"
+                    )
+                ])
+            keyboard.append([InlineKeyboardButton("Done", callback_data="distribute_platforms_done")])
+            
+            await update.message.reply_text(
+                "🌐 Let's set up distribution!\n\n"
+                "Select the platforms you want to distribute to:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_DISTRIBUTION_PLATFORMS
+            
+        except Exception as e:
+            logger.error(f"Error starting distribution: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error starting distribution setup. Please try again."
+            )
+            return ConversationHandler.END
+
+    async def handle_distribution_platforms(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle platform selection."""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data == "distribute_platforms_done":
+            if not context.user_data["distributing_release"]["platforms"]:
+                await query.message.reply_text(
+                    "Please select at least one platform:"
+                )
+                return AWAITING_DISTRIBUTION_PLATFORMS
+                
+            # Show territory options
+            keyboard = [
+                [
+                    InlineKeyboardButton("Worldwide", callback_data="distribute_territory_worldwide"),
+                    InlineKeyboardButton("Select Regions", callback_data="distribute_territory_select")
+                ]
+            ]
+            
+            await query.message.edit_text(
+                "Where would you like to distribute your music?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_DISTRIBUTION_TERRITORIES
+            
+        else:
+            platform = query.data.replace("distribute_platform_", "")
+            if platform in [p.value for p in DistributionPlatform]:
+                platforms = context.user_data["distributing_release"]["platforms"]
+                if platform in platforms:
+                    platforms.remove(platform)
+                    await query.message.edit_text(
+                        f"Removed {platform.replace('_', ' ').title()} from distribution"
+                    )
+                else:
+                    platforms.append(platform)
+                    await query.message.edit_text(
+                        f"Added {platform.replace('_', ' ').title()} to distribution"
+                    )
+            return AWAITING_DISTRIBUTION_PLATFORMS
+
+    async def handle_distribution_territories(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle territory selection."""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data == "distribute_territory_worldwide":
+            context.user_data["distributing_release"]["territories"] = ["worldwide"]
+            
+            await query.message.edit_text(
+                "When would you like to release?\n"
+                "Enter the date in YYYY-MM-DD format:",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_DISTRIBUTION_DATE
+            
+        elif query.data == "distribute_territory_select":
+            # Show region selection
+            keyboard = [
+                [
+                    InlineKeyboardButton("North America", callback_data="distribute_region_na"),
+                    InlineKeyboardButton("Europe", callback_data="distribute_region_eu")
+                ],
+                [
+                    InlineKeyboardButton("Asia", callback_data="distribute_region_asia"),
+                    InlineKeyboardButton("Oceania", callback_data="distribute_region_oceania")
+                ],
+                [
+                    InlineKeyboardButton("South America", callback_data="distribute_region_sa"),
+                    InlineKeyboardButton("Africa", callback_data="distribute_region_africa")
+                ],
+                [InlineKeyboardButton("Done", callback_data="distribute_regions_done")]
+            ]
+            
+            await query.message.edit_text(
+                "Select regions for distribution:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_DISTRIBUTION_TERRITORIES
+            
+        elif query.data == "distribute_regions_done":
+            if not context.user_data["distributing_release"]["territories"]:
+                await query.message.reply_text(
+                    "Please select at least one region:"
+                )
+                return AWAITING_DISTRIBUTION_TERRITORIES
+                
+            await query.message.edit_text(
+                "When would you like to release?\n"
+                "Enter the date in YYYY-MM-DD format:",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_DISTRIBUTION_DATE
+            
+        else:
+            region = query.data.replace("distribute_region_", "")
+            territories = context.user_data["distributing_release"]["territories"]
+            if region in territories:
+                territories.remove(region)
+                await query.message.edit_text(
+                    f"Removed {region.upper()} from distribution"
+                )
+            else:
+                territories.append(region)
+                await query.message.edit_text(
+                    f"Added {region.upper()} to distribution"
+                )
+            return AWAITING_DISTRIBUTION_TERRITORIES
+
+    async def handle_distribution_date(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle distribution date input."""
+        try:
+            release_date = datetime.strptime(update.message.text.strip(), "%Y-%m-%d")
+            context.user_data["distributing_release"]["release_date"] = release_date
+            
+            # Show pricing options
+            keyboard = [
+                [
+                    InlineKeyboardButton("Free", callback_data="distribute_price_0"),
+                    InlineKeyboardButton("$0.99", callback_data="distribute_price_0.99")
+                ],
+                [
+                    InlineKeyboardButton("$1.29", callback_data="distribute_price_1.29"),
+                    InlineKeyboardButton("Custom", callback_data="distribute_price_custom")
+                ]
+            ]
+            
+            await update.message.reply_text(
+                "Set your release price:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_DISTRIBUTION_PRICE
+            
+        except ValueError:
+            await update.message.reply_text(
+                "Please enter a valid date in YYYY-MM-DD format:"
+            )
+            return AWAITING_DISTRIBUTION_DATE
+
+    async def handle_distribution_price(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle distribution price selection and complete setup."""
+        try:
+            query = update.callback_query
+            await query.answer()
+            
+            if query.data == "distribute_price_custom":
+                await query.message.edit_text(
+                    "Enter your custom price in USD (e.g. 2.99):",
+                    reply_markup=ForceReply(selective=True)
+                )
+                return AWAITING_DISTRIBUTION_PRICE
+                
+            # Get price from callback data
+            price = float(query.data.replace("distribute_price_", ""))
+            context.user_data["distributing_release"]["price"] = price
+            
+            # Create distribution setup
+            distribution_data = context.user_data.pop("distributing_release")
+            
+            # Show summary and confirmation
+            platforms_text = "\n".join(
+                f"• {p.replace('_', ' ').title()}"
+                for p in distribution_data["platforms"]
+            )
+            
+            territories_text = (
+                "Worldwide"
+                if "worldwide" in distribution_data["territories"]
+                else "\n".join(f"• {t.upper()}" for t in distribution_data["territories"])
+            )
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("Confirm", callback_data=f"distribute_confirm_{distribution_data['id']}"),
+                    InlineKeyboardButton("Cancel", callback_data="distribute_cancel")
+                ]
+            ]
+            
+            await query.message.edit_text(
+                "📝 Distribution Summary\n\n"
+                "Platforms:\n"
+                f"{platforms_text}\n\n"
+                "Territories:\n"
+                f"{territories_text}\n\n"
+                f"Release Date: {distribution_data['release_date'].strftime('%Y-%m-%d')}\n"
+                f"Price: ${distribution_data['price']:.2f}\n\n"
+                "Ready to submit?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return ConversationHandler.END
+            
+        except Exception as e:
+            logger.error(f"Error handling distribution price: {str(e)}")
+            await update.effective_message.reply_text(
+                "Sorry, there was an error setting up distribution. Please try again."
+            )
+            return ConversationHandler.END
+
+    async def cancel_distribution(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancel distribution setup."""
+        if "distributing_release" in context.user_data:
+            context.user_data.pop("distributing_release")
+            
+        await update.message.reply_text(
+            "Distribution setup cancelled. You can start over with /newdistribution"
+        )
         return ConversationHandler.END 

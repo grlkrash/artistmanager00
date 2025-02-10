@@ -4,8 +4,33 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CommandHandler, CallbackQueryHandler, ContextTypes, BaseHandler
 from .base_handler import BaseHandlerMixin
+from datetime import datetime
+import uuid
+from typing import Dict, Optional
+from telegram import Message, ForceReply, CallbackQuery, ReplyKeyboardMarkup
+from ..models import NetworkType
 
 logger = logging.getLogger(__name__)
+
+# Conversation states for wallet
+AWAITING_WALLET_ADDRESS = "AWAITING_WALLET_ADDRESS"
+AWAITING_WALLET_NETWORK = "AWAITING_WALLET_NETWORK"
+AWAITING_SEND_ADDRESS = "AWAITING_SEND_ADDRESS"
+AWAITING_SEND_AMOUNT = "AWAITING_SEND_AMOUNT"
+AWAITING_SEND_ASSET = "AWAITING_SEND_ASSET"
+
+# Conversation states for NFT
+AWAITING_NFT_NAME = "AWAITING_NFT_NAME"
+AWAITING_NFT_SYMBOL = "AWAITING_NFT_SYMBOL"
+AWAITING_NFT_DESCRIPTION = "AWAITING_NFT_DESCRIPTION"
+AWAITING_NFT_ARTWORK = "AWAITING_NFT_ARTWORK"
+AWAITING_NFT_PRICE = "AWAITING_NFT_PRICE"
+
+# Conversation states for token
+AWAITING_TOKEN_NAME = "AWAITING_TOKEN_NAME"
+AWAITING_TOKEN_SYMBOL = "AWAITING_TOKEN_SYMBOL"
+AWAITING_TOKEN_SUPPLY = "AWAITING_TOKEN_SUPPLY"
+AWAITING_TOKEN_DECIMALS = "AWAITING_TOKEN_DECIMALS"
 
 class BlockchainHandlers(BaseHandlerMixin):
     """Handlers for blockchain-related functionality."""

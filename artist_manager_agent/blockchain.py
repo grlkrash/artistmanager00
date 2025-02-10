@@ -63,6 +63,28 @@ class Token(BaseModel):
     created_at: datetime = datetime.now()
     updated_at: datetime = datetime.now()
 
+class TransactionRecord(BaseModel):
+    """Transaction record information."""
+    id: str
+    tx_hash: str
+    from_address: str
+    to_address: str
+    amount: float
+    asset: str
+    gas_used: float
+    gas_price: float
+    status: str
+    timestamp: datetime
+    metadata: Dict[str, Any]
+
+class GasEstimate(BaseModel):
+    """Gas estimate information."""
+    operation: str
+    gas_limit: float
+    gas_price: float
+    total_cost: float
+    timestamp: datetime
+
 class BlockchainManager:
     """Manager for blockchain operations."""
     
@@ -253,4 +275,243 @@ class BlockchainManager:
         return {
             "network": self.wallet.network_id,
             "default_address": self.wallet.default_address.address_id
-        } 
+        }
+
+    async def get_transaction_history(
+        self,
+        address: Optional[str] = None,
+        asset: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> List[TransactionRecord]:
+        """Get transaction history."""
+        if not self.wallet:
+            raise ValueError("Wallet not initialized")
+            
+        try:
+            # Get transactions from blockchain
+            transactions = []
+            for tx in await self.wallet.get_transactions(address):
+                # Create transaction record
+                record = TransactionRecord(
+                    id=str(uuid.uuid4()),
+                    tx_hash=tx.hash,
+                    from_address=tx.from_address,
+                    to_address=tx.to_address,
+                    amount=tx.value,
+                    asset=tx.token_symbol or "eth",
+                    gas_used=tx.gas_used,
+                    gas_price=tx.gas_price,
+                    status=tx.status,
+                    timestamp=tx.timestamp,
+                    metadata=tx.metadata
+                )
+                
+                # Apply filters
+                if asset and record.asset.lower() != asset.lower():
+                    continue
+                if start_time and record.timestamp < start_time:
+                    continue
+                if end_time and record.timestamp > end_time:
+                    continue
+                    
+                transactions.append(record)
+                
+            return sorted(transactions, key=lambda x: x.timestamp, reverse=True)
+            
+        except Exception as e:
+            raise Exception(f"Failed to get transaction history: {str(e)}")
+
+    async def estimate_gas(
+        self,
+        operation: str,
+        params: Dict[str, Any]
+    ) -> GasEstimate:
+        """Estimate gas for an operation."""
+        if not self.wallet:
+            raise ValueError("Wallet not initialized")
+            
+        try:
+            # Get current gas price
+            gas_price = await self.wallet.get_gas_price()
+            
+            # Estimate gas limit based on operation
+            if operation == "transfer":
+                gas_limit = await self.wallet.estimate_transfer_gas(
+                    to_address=params["to_address"],
+                    amount=params["amount"],
+                    token_address=params.get("token_address")
+                )
+            elif operation == "deploy_nft":
+                gas_limit = await self.wallet.estimate_deploy_nft_gas(
+                    name=params["name"],
+                    symbol=params["symbol"],
+                    base_uri=params["base_uri"]
+                )
+            elif operation == "deploy_token":
+                gas_limit = await self.wallet.estimate_deploy_token_gas(
+                    name=params["name"],
+                    symbol=params["symbol"],
+                    total_supply=params["total_supply"]
+                )
+            elif operation == "mint_nft":
+                gas_limit = await self.wallet.estimate_mint_nft_gas(
+                    contract_address=params["contract_address"],
+                    recipient=params["recipient"],
+                    token_uri=params["token_uri"]
+                )
+            else:
+                raise ValueError(f"Unknown operation: {operation}")
+                
+            # Calculate total cost
+            total_cost = (gas_limit * gas_price) / 1e18  # Convert to ETH
+            
+            return GasEstimate(
+                operation=operation,
+                gas_limit=gas_limit,
+                gas_price=gas_price,
+                total_cost=total_cost,
+                timestamp=datetime.now()
+            )
+            
+        except Exception as e:
+            raise Exception(f"Failed to estimate gas: {str(e)}")
+
+    async def swap_tokens(
+        self,
+        token_in: str,
+        token_out: str,
+        amount_in: str,
+        min_amount_out: Optional[str] = None,
+        slippage: float = 0.005  # 0.5% default slippage
+    ) -> str:
+        """Swap tokens using DEX."""
+        if not self.wallet:
+            raise ValueError("Wallet not initialized")
+            
+        try:
+            # Get quote for swap
+            quote = await self.wallet.get_swap_quote(
+                token_in=token_in,
+                token_out=token_out,
+                amount_in=amount_in
+            )
+            
+            # Calculate minimum amount out with slippage
+            if not min_amount_out:
+                amount_out = float(quote.amount_out)
+                min_amount_out = str(int(amount_out * (1 - slippage)))
+            
+            # Execute swap
+            result = await self.wallet.swap_tokens(
+                token_in=token_in,
+                token_out=token_out,
+                amount_in=amount_in,
+                min_amount_out=min_amount_out,
+                deadline=int(datetime.now().timestamp() + 1800)  # 30 min deadline
+            )
+            
+            tx_hash = str(getattr(result, 'transaction_hash', None))
+            if not tx_hash:
+                raise ValueError("Failed to get transaction hash")
+                
+            return tx_hash
+            
+        except Exception as e:
+            raise Exception(f"Failed to swap tokens: {str(e)}")
+
+    async def get_token_price(
+        self,
+        token_address: str,
+        quote_currency: str = "usd"
+    ) -> float:
+        """Get token price."""
+        if not self.wallet:
+            raise ValueError("Wallet not initialized")
+            
+        try:
+            price = await self.wallet.get_token_price(
+                token_address=token_address,
+                quote_currency=quote_currency
+            )
+            return float(price)
+            
+        except Exception as e:
+            raise Exception(f"Failed to get token price: {str(e)}")
+
+    async def get_swap_routes(
+        self,
+        token_in: str,
+        token_out: str,
+        amount_in: str
+    ) -> List[Dict[str, Any]]:
+        """Get available swap routes."""
+        if not self.wallet:
+            raise ValueError("Wallet not initialized")
+            
+        try:
+            routes = await self.wallet.get_swap_routes(
+                token_in=token_in,
+                token_out=token_out,
+                amount_in=amount_in
+            )
+            
+            return [
+                {
+                    "path": route.path,
+                    "amount_out": route.amount_out,
+                    "price_impact": route.price_impact,
+                    "gas_estimate": route.gas_estimate
+                }
+                for route in routes
+            ]
+            
+        except Exception as e:
+            raise Exception(f"Failed to get swap routes: {str(e)}")
+
+    async def approve_token(
+        self,
+        token_address: str,
+        spender_address: str,
+        amount: Optional[str] = None
+    ) -> str:
+        """Approve token spending."""
+        if not self.wallet:
+            raise ValueError("Wallet not initialized")
+            
+        try:
+            result = await self.wallet.approve_token(
+                token_address=token_address,
+                spender_address=spender_address,
+                amount=amount or "115792089237316195423570985008687907853269984665640564039457584007913129639935"  # Max uint256
+            )
+            
+            tx_hash = str(getattr(result, 'transaction_hash', None))
+            if not tx_hash:
+                raise ValueError("Failed to get transaction hash")
+                
+            return tx_hash
+            
+        except Exception as e:
+            raise Exception(f"Failed to approve token: {str(e)}")
+
+    async def get_token_allowance(
+        self,
+        token_address: str,
+        owner_address: str,
+        spender_address: str
+    ) -> str:
+        """Get token allowance."""
+        if not self.wallet:
+            raise ValueError("Wallet not initialized")
+            
+        try:
+            allowance = await self.wallet.get_token_allowance(
+                token_address=token_address,
+                owner_address=owner_address,
+                spender_address=spender_address
+            )
+            return str(allowance)
+            
+        except Exception as e:
+            raise Exception(f"Failed to get token allowance: {str(e)}") 

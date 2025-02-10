@@ -262,3 +262,90 @@ class Token(BaseModel):
         "extra": "allow",
         "arbitrary_types_allowed": True
     }
+
+class StreamingStats(BaseModelWithId):
+    """Model for streaming statistics."""
+    track_id: str
+    platform: DistributionPlatform
+    streams: int
+    unique_listeners: int
+    saves: int
+    playlist_adds: int
+    revenue: float
+    period_start: datetime
+    period_end: datetime
+    metadata: Dict[str, Any] = {}
+
+class PromotionCampaign(BaseModelWithId):
+    """Model for promotion campaigns."""
+    title: str
+    type: str  # social, playlist, pr, etc.
+    target_platforms: List[str]
+    budget: float
+    start_date: datetime
+    end_date: datetime
+    status: str
+    metrics: Dict[str, Any] = {}
+
+class TransactionRecord(BaseModelWithId):
+    """Model for blockchain transactions."""
+    tx_hash: str
+    from_address: str
+    to_address: str
+    amount: str
+    asset: str
+    gas_used: int
+    gas_price: int
+    status: str
+    timestamp: datetime
+    metadata: Dict[str, Any] = {}
+
+class GasEstimate(BaseModel):
+    """Model for gas estimates."""
+    operation: str
+    gas_limit: int
+    gas_price: int
+    total_cost: float
+    timestamp: datetime
+
+class PerformanceMetric(BaseModelWithId):
+    """Model for team member performance metrics."""
+    collaborator_id: str
+    metric_type: str
+    value: float
+    period_start: datetime
+    period_end: datetime
+    notes: str = ""
+    metadata: Dict[str, Any] = {}
+
+class TeamSchedule(BaseModelWithId):
+    """Model for team scheduling."""
+    collaborator_id: str
+    event_type: str
+    start_time: datetime
+    end_time: datetime
+    status: str
+    notes: str = ""
+    metadata: Dict[str, Any] = {}
+
+class ResourceAllocation(BaseModelWithId):
+    """Model for project resource allocation."""
+    project_id: str
+    resource_type: str
+    amount: float
+    unit: str
+    start_date: datetime
+    end_date: datetime
+    status: str
+    cost: float = 0
+    metadata: Dict[str, Any] = {}
+
+class BudgetEntry(BaseModelWithId):
+    """Model for project budget tracking."""
+    project_id: str
+    category: str
+    amount: float
+    entry_type: str  # planned, actual
+    date: datetime
+    description: str = ""
+    metadata: Dict[str, Any] = {}
