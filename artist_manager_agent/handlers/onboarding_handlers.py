@@ -493,26 +493,153 @@ class OnboardingHandlers(BaseHandlerMixin):
         )
         return AWAITING_SOCIAL_MEDIA
 
+    def _parse_social_media(self, text: str) -> Dict[str, str]:
+        """Parse social media handles from various formats."""
+        social_media = {}
+        
+        # Skip if user wants to skip
+        if text.lower() == 'skip':
+            return social_media
+            
+        # Process each line
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Try different formats:
+            # 1. platform: @handle
+            # 2. platform - @handle
+            # 3. platform @handle
+            # 4. @handle (platform)
+            # 5. @handle - platform
+            # 6. Just @handle platform
+            
+            # Remove common separators
+            line = line.replace(':', ' ').replace('-', ' ').replace('(', ' ').replace(')', ' ')
+            parts = [p.strip() for p in line.split() if p.strip()]
+            
+            if not parts:
+                continue
+                
+            # Find the handle (starts with @) and platform
+            handle_part = next((p for p in parts if p.startswith('@')), None)
+            if handle_part:
+                # Handle found, platform is the other part
+                platform_part = next((p for p in parts if p != handle_part), None)
+                if platform_part:
+                    social_media[platform_part.lower()] = handle_part
+            else:
+                # No @ symbol, assume last part is handle
+                if len(parts) >= 2:
+                    platform = parts[0].lower()
+                    handle = parts[-1]
+                    # Add @ if missing
+                    if not handle.startswith('@'):
+                        handle = f"@{handle}"
+                    social_media[platform] = handle
+                    
+        return social_media
+
+    def _parse_streaming_profiles(self, text: str) -> Dict[str, str]:
+        """Parse streaming profiles from various formats."""
+        streaming = {}
+        
+        # Skip if user wants to skip
+        if text.lower() == 'skip':
+            return streaming
+            
+        # Common streaming platforms to detect
+        PLATFORMS = {
+            'spotify': ['spotify', 'spot'],
+            'apple': ['apple', 'apple music', 'itunes'],
+            'soundcloud': ['soundcloud', 'sc'],
+            'youtube': ['youtube', 'yt'],
+            'bandcamp': ['bandcamp', 'bc'],
+            'tidal': ['tidal'],
+            'deezer': ['deezer']
+        }
+        
+        # Process each line
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+                
+            # If it's just a URL, try to detect platform
+            if line.startswith(('http://', 'https://')):
+                for platform, keywords in PLATFORMS.items():
+                    if any(k in line.lower() for k in keywords):
+                        streaming[platform] = line
+                        break
+                continue
+                
+            # Try different formats with platform name
+            # Remove common separators
+            line = line.replace(':', ' ').replace('-', ' ').replace('(', ' ').replace(')', ' ')
+            parts = [p.strip() for p in line.split() if p.strip()]
+            
+            if len(parts) >= 2:
+                # Try to identify platform from first or last word
+                platform_word = parts[0].lower()
+                url_part = ' '.join(parts[1:])
+                
+                # Check if platform is at the end instead
+                if any(k in platform_word for p, keywords in PLATFORMS.items() for k in keywords):
+                    platform = next(p for p, keywords in PLATFORMS.items() 
+                                 if any(k in platform_word for k in keywords))
+                else:
+                    platform_word = parts[-1].lower()
+                    if any(k in platform_word for p, keywords in PLATFORMS.items() for k in keywords):
+                        platform = next(p for p, keywords in PLATFORMS.items() 
+                                     if any(k in platform_word for k in keywords))
+                        url_part = ' '.join(parts[:-1])
+                    else:
+                        continue
+                        
+                # Clean up URL
+                url = url_part.strip()
+                if not url.startswith(('http://', 'https://')):
+                    url = f"https://{url}"
+                    
+                streaming[platform] = url
+                
+        return streaming
+
     async def handle_social_media(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle social media input."""
         text = update.message.text.strip()
         
-        if text.lower() != 'skip':
-            # Parse social media handles
-            social_media = {}
-            for line in text.split('\n'):
-                if ':' in line:
-                    platform, handle = line.split(':', 1)
-                    social_media[platform.strip().lower()] = handle.strip()
+        # Parse social media handles
+        social_media = self._parse_social_media(text)
+        if social_media:
             context.user_data['social_media'] = social_media
         
+        # Show what was understood
+        if social_media:
+            confirmation = "I understood these social media profiles:\n\n"
+            for platform, handle in social_media.items():
+                confirmation += f"• {platform.title()}: {handle}\n"
+            confirmation += "\nIs this correct? (Yes/No)"
+            
+            keyboard = [["Yes", "No"]]
+            await update.message.reply_text(
+                confirmation,
+                reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+            )
+            return AWAITING_SOCIAL_MEDIA
+            
+        # Move to next step
         await update.message.reply_text(
-            "Last step! Please share your streaming platform profiles.\n"
-            "Format: platform: profile_url\n\n"
+            "Great! Now for your streaming platform profiles.\n"
+            "You can:\n"
+            "• Paste links directly\n"
+            "• List platform name and link\n"
+            "• Use any format (Spotify: link or Spotify - link etc)\n\n"
             "Example:\n"
-            "Spotify: spotify.com/artist/...\n"
+            "spotify.com/artist/...\n"
             "Apple Music: music.apple.com/...\n"
-            "SoundCloud: soundcloud.com/...\n\n"
+            "soundcloud - soundcloud.com/...\n\n"
             "Or type 'skip' to skip this step.",
             reply_markup=ForceReply(selective=True)
         )
@@ -522,32 +649,51 @@ class OnboardingHandlers(BaseHandlerMixin):
         """Handle streaming profiles input."""
         text = update.message.text.strip()
         
-        if text.lower() != 'skip':
-            # Parse streaming profiles
-            streaming = {}
-            for line in text.split('\n'):
-                if ':' in line:
-                    platform, url = line.split(':', 1)
-                    streaming[platform.strip().lower()] = url.strip()
+        # If confirming social media
+        if text.lower() in ['yes', 'no']:
+            if text.lower() == 'no':
+                await update.message.reply_text(
+                    "Please enter your social media profiles again:",
+                    reply_markup=ForceReply(selective=True)
+                )
+                return AWAITING_SOCIAL_MEDIA
+            
+            # If yes, move to streaming profiles
+            await update.message.reply_text(
+                "Great! Now for your streaming platform profiles.\n"
+                "You can:\n"
+                "• Paste links directly\n"
+                "• List platform name and link\n"
+                "• Use any format (Spotify: link or Spotify - link etc)\n\n"
+                "Example:\n"
+                "spotify.com/artist/...\n"
+                "Apple Music: music.apple.com/...\n"
+                "soundcloud - soundcloud.com/...\n\n"
+                "Or type 'skip' to skip this step.",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_STREAMING_PROFILES
+        
+        # Parse streaming profiles
+        streaming = self._parse_streaming_profiles(text)
+        if streaming:
             context.user_data['streaming_profiles'] = streaming
-        
-        # Create profile summary
-        profile_text = self._create_profile_summary(context.user_data)
-        
-        # Create confirmation keyboard
-        keyboard = [
-            ["Confirm Profile"],
-            ["Edit Profile"],
-            ["Start Over"]
-        ]
-        
-        await update.message.reply_text(
-            "Here's your profile summary:\n\n"
-            f"{profile_text}\n\n"
-            "What would you like to do?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-        )
-        return CONFIRM_PROFILE
+            
+            # Show what was understood
+            confirmation = "I understood these streaming profiles:\n\n"
+            for platform, url in streaming.items():
+                confirmation += f"• {platform.title()}: {url}\n"
+            confirmation += "\nIs this correct? (Yes/No)"
+            
+            keyboard = [["Yes", "No"]]
+            await update.message.reply_text(
+                confirmation,
+                reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+            )
+            return AWAITING_STREAMING_PROFILES
+            
+        # If skipped or no profiles entered, move to profile confirmation
+        return await self._show_profile_summary(update, context)
 
     def _create_profile_summary(self, data: Dict[str, Any]) -> str:
         """Create a formatted profile summary."""
@@ -598,15 +744,22 @@ class OnboardingHandlers(BaseHandlerMixin):
                 career_stage=context.user_data.get('career_stage', ''),
                 goals=context.user_data.get('goals', []),
                 strengths=context.user_data.get('strengths', []),
-                improvements=context.user_data.get('improvements', []),
+                areas_for_improvement=context.user_data.get('improvements', []),
                 achievements=context.user_data.get('achievements', []),
                 social_media=context.user_data.get('social_media', {}),
                 streaming_profiles=context.user_data.get('streaming_profiles', {}),
-                created_at=datetime.now()
+                brand_guidelines={
+                    "description": "Default brand guidelines",
+                    "colors": [],
+                    "fonts": [],
+                    "tone": "professional"
+                },
+                created_at=datetime.now(),
+                updated_at=datetime.now()
             )
             
             # Save profile
-            self.bot.profiles[str(update.effective_user.id)] = profile.dict()
+            self.bot.profiles[str(update.effective_user.id)] = profile
             
             # Show success message
             keyboard = [
