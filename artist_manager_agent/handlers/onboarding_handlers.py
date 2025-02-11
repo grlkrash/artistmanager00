@@ -159,7 +159,8 @@ class OnboardingHandlers(BaseHandlerMixin):
                 CommandHandler("skip", self.skip_current_step)
             ],
             name="onboarding",
-            persistent=True
+            persistent=True,
+            allow_reentry=True
         )
 
     def _load_name_data(self):

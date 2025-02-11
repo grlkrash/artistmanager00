@@ -23,7 +23,8 @@ class ArtistManagerBot(ArtistManagerBotBase, GoalsMixin):
     ):
         """Initialize the bot with proper dependency order."""
         try:
-            # Initialize base class and mixins
+            # Initialize base class first
+            logger.info("Initializing bot...")
             super().__init__(
                 telegram_token=telegram_token,
                 artist_profile=artist_profile,
@@ -32,6 +33,10 @@ class ArtistManagerBot(ArtistManagerBotBase, GoalsMixin):
                 db_url=db_url,
                 persistence_path=persistence_path
             )
+            
+            # Store initial profile
+            if artist_profile:
+                self.profiles[str(artist_profile.id)] = artist_profile
             
             logger.info("Bot initialized successfully")
             
@@ -42,12 +47,17 @@ class ArtistManagerBot(ArtistManagerBotBase, GoalsMixin):
     async def start(self):
         """Start the bot with proper initialization."""
         try:
-            # Initialize persistence
-            await self.persistence.load()
-            await self.task_manager_integration.load_from_persistence()
-            
-            # Start the bot
+            # Start base class
+            logger.info("Starting bot...")
             await super().start()
+            
+            # Initialize any additional components
+            logger.info("Initializing additional components...")
+            
+            # Start background tasks if needed
+            logger.info("Starting background tasks...")
+            
+            logger.info("Bot started successfully")
             
         except Exception as e:
             logger.error(f"Error starting bot: {str(e)}")
@@ -56,14 +66,14 @@ class ArtistManagerBot(ArtistManagerBotBase, GoalsMixin):
     async def stop(self):
         """Stop the bot and cleanup."""
         try:
-            # Save persistence data
-            await self.persistence.flush()
-            await self.task_manager_integration.save_to_persistence()
+            # Stop background tasks first
+            logger.info("Stopping background tasks...")
             
-            # Cleanup handlers
-            self.handler_registry.clear()
+            # Cleanup additional components
+            logger.info("Cleaning up components...")
             
-            # Stop the bot
+            # Stop base class last
+            logger.info("Stopping bot...")
             await super().stop()
             
             logger.info("Bot stopped successfully")

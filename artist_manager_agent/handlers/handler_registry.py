@@ -1,6 +1,6 @@
 """Handler registry for managing all bot handlers."""
 from typing import Dict, Any
-from telegram.ext import Application
+from telegram.ext import Application, ConversationHandler
 import logging
 
 from .base_handler import BaseHandlerMixin
@@ -38,18 +38,34 @@ class HandlerRegistry:
         """Register all handlers with the application.
         
         Handlers are registered in order of their group number.
+        Conversation handlers are registered first within each group.
         """
         try:
             # Sort handlers by group number
             sorted_handlers = sorted(self._handlers.items())
             
-            # Register each handler
+            # First pass: register conversation handlers
             for group, handler in sorted_handlers:
                 try:
-                    handler.register_handlers(application)
-                    logger.debug(f"Registered handlers for group {group}")
+                    handlers = handler.get_handlers()
+                    for h in handlers:
+                        if isinstance(h, ConversationHandler):
+                            application.add_handler(h, group=group)
+                            logger.debug(f"Registered conversation handler in group {group}")
                 except Exception as e:
-                    logger.error(f"Error registering handlers for group {group}: {str(e)}")
+                    logger.error(f"Error registering conversation handlers for group {group}: {str(e)}")
+                    raise
+                    
+            # Second pass: register regular handlers
+            for group, handler in sorted_handlers:
+                try:
+                    handlers = handler.get_handlers()
+                    for h in handlers:
+                        if not isinstance(h, ConversationHandler):
+                            application.add_handler(h, group=group)
+                            logger.debug(f"Registered handler {h.__class__.__name__} in group {group}")
+                except Exception as e:
+                    logger.error(f"Error registering regular handlers for group {group}: {str(e)}")
                     raise
                     
             logger.info("All handlers registered successfully")
