@@ -50,7 +50,11 @@ from .dashboard import Dashboard
 from .team_manager import TeamManager
 from .ai_handler import AIHandler
 from .handlers.handler_registry import HandlerRegistry
-from .handlers.base_handler import BaseHandlerMixin
+from .handlers.base_handler import BaseBotHandler
+from .handlers.core_handlers import CoreHandlers
+from .handlers.onboarding_handlers import OnboardingHandlers
+from .handlers.home_handler import HomeHandlers
+from .handlers.name_change_handler import NameChangeHandlers
 import uuid
 import logging
 import asyncio
@@ -67,12 +71,8 @@ from .config import (
     DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS
 )
 import threading
-from .handlers.core_handlers import CoreHandlers
-from .handlers.onboarding_handlers import OnboardingHandlers
-from .handlers.home_handler import HomeHandlers
-from .handlers.name_change_handler import NameChangeHandlers
 
-class CoreHandlers(BaseHandlerMixin):
+class CoreHandlers(BaseBotHandler):
     """Core command handlers."""
     
     group = 0  # Core handler group for registration
@@ -90,10 +90,10 @@ class CoreHandlers(BaseHandlerMixin):
             CommandHandler("update", self.bot.edit_profile)
         ]
 
-class ArtistManagerBot:
+class BaseBot:
     """Base class for the Artist Manager bot."""
     
-    _instance: ClassVar[Optional['ArtistManagerBot']] = None
+    _instance: ClassVar[Optional['BaseBot']] = None
     _lock = threading.Lock()
     _initialized = False
     
@@ -150,19 +150,29 @@ class ArtistManagerBot:
     def _init_components(self):
         """Initialize bot components in the correct order."""
         try:
-            # 1. Initialize persistence first
+            # 1. Initialize persistence first with proper state tracking
             logger.info("Initializing persistence...")
             persistence_path = Path(self.config["persistence_path"])
             persistence_path.parent.mkdir(parents=True, exist_ok=True)
             
             self.persistence = RobustPersistence(
                 filepath=str(persistence_path.resolve()),
-                backup_count=3,
+                backup_count=5,  # Increased from 3
                 store_data=True,
-                update_interval=60
+                update_interval=30,  # Decreased from 60
+                store_callback_data=True,
+                store_user_data=True,
+                store_chat_data=True,
+                store_bot_data=True
             )
             
-            # 2. Initialize application builder with persistence
+            # 2. Load existing state before initializing components
+            if hasattr(self.persistence, 'get_bot_data'):
+                self.bot_data = self.persistence.get_bot_data()
+            else:
+                self.bot_data = {}
+            
+            # 3. Initialize application with persistence
             logger.info("Initializing application...")
             builder = (
                 ApplicationBuilder()
@@ -174,15 +184,16 @@ class ArtistManagerBot:
                 .pool_timeout(30.0)
                 .read_timeout(30.0)
                 .write_timeout(30.0)
+                .arbitrary_callback_data(True)  # Enable arbitrary callback data
             )
             
             self.application = builder.build()
             
-            # 3. Initialize handler registry
+            # 4. Initialize handler registry
             logger.info("Initializing handler registry...")
             self.handler_registry = HandlerRegistry()
             
-            # 4. Initialize all handlers in correct order
+            # 5. Initialize all handlers in correct order
             logger.info("Initializing bot handlers...")
             self.onboarding = OnboardingHandlers(self)
             self.core_handlers = CoreHandlers(self)
@@ -196,14 +207,14 @@ class ArtistManagerBot:
             self.home_handlers = HomeHandlers(self)
             self.name_change_handlers = NameChangeHandlers(self)
             
-            # 5. Initialize supporting components
+            # 6. Initialize supporting components
             logger.info("Initializing supporting components...")
             self.team_manager = TeamManager(team_id="default")
             self.dashboard = Dashboard(self)
             self.project_manager = ProjectManager(self)
             self.task_manager_integration = TaskManagerIntegration(self.persistence)
             
-            # 6. Register all handlers
+            # 7. Register all handlers
             logger.info("Registering handlers...")
             self._register_handlers()
             

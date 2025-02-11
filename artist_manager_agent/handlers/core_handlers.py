@@ -18,9 +18,8 @@ class CoreHandlers(BaseBotHandler):
         """Get core command handlers."""
         return [
             CommandHandler("help", self.show_help),
-            CommandHandler("menu", self.show_menu),
-            CommandHandler("profile", self.show_profile),
-            CallbackQueryHandler(self.handle_core_callback, pattern="^(core_.*|menu_.*)$")
+            CommandHandler("settings", self.show_settings),
+            CallbackQueryHandler(self.handle_core_callback, pattern="^core_(.*|settings_.*)$")
         ]
 
     async def handle_core_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

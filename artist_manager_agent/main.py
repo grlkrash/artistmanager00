@@ -1,6 +1,9 @@
 """Main entry point for the Artist Manager Bot."""
 import os
 import sys
+import signal
+import atexit
+import psutil
 import asyncio
 import logging
 from pathlib import Path
@@ -25,6 +28,37 @@ from .utils.config import (
 
 logger = get_logger(__name__)
 
+def write_pid_file():
+    """Write PID file for process tracking."""
+    pid = os.getpid()
+    pid_file = Path(DATA_DIR) / "bot.pid"
+    pid_file.write_text(str(pid))
+    return pid_file
+
+def cleanup_pid_file(pid_file):
+    """Clean up PID file on exit."""
+    try:
+        pid_file.unlink()
+    except Exception as e:
+        logger.error(f"Error removing PID file: {e}")
+
+def kill_existing_bot():
+    """Kill any existing bot process."""
+    try:
+        pid_file = Path(DATA_DIR) / "bot.pid"
+        if pid_file.exists():
+            pid = int(pid_file.read_text())
+            try:
+                process = psutil.Process(pid)
+                if process.is_running():
+                    process.terminate()
+                    process.wait(timeout=5)
+            except psutil.NoSuchProcess:
+                pass
+            pid_file.unlink()
+    except Exception as e:
+        logger.error(f"Error killing existing bot: {e}")
+
 async def cleanup_resources(bot: ArtistManagerBot) -> None:
     """Cleanup resources before shutdown."""
     try:
@@ -37,6 +71,11 @@ async def cleanup_resources(bot: ArtistManagerBot) -> None:
             await bot.application.shutdown()
     except Exception as e:
         logger.error(f"Error during cleanup: {str(e)}")
+
+def signal_handler(signum, frame):
+    """Handle termination signals."""
+    logger.info(f"Received signal {signum}")
+    sys.exit(0)
 
 async def initialize_bot(bot: ArtistManagerBot) -> None:
     """Initialize the bot with proper error handling."""
@@ -78,8 +117,16 @@ async def initialize_bot(bot: ArtistManagerBot) -> None:
 async def run_bot(bot: ArtistManagerBot) -> None:
     """Run the bot with proper lifecycle management."""
     try:
-        # Initialize bot
-        await initialize_bot(bot)
+        # Kill any existing bot process
+        kill_existing_bot()
+        
+        # Write PID file
+        pid_file = write_pid_file()
+        atexit.register(cleanup_pid_file, pid_file)
+        
+        # Register signal handlers
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
         
         # Start polling with clean state
         logger.info("Starting polling...")

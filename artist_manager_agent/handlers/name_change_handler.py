@@ -67,25 +67,11 @@ class NameChangeHandlers(BaseBotHandler):
         # Get current name from context or use default
         current_name = context.bot_data.get('manager_name', 'Kennedy Young')
         
-        # Store current name in conversation state
-        context.user_data['name_change_state'] = {
-            'current_name': current_name,
-            'step': 'awaiting_input'
-        }
-        
-        # Create keyboard with options
-        keyboard = [
-            [InlineKeyboardButton("Keep Current Name", callback_data="name_keep")],
-            [InlineKeyboardButton("Change Name", callback_data="name_change")]
-        ]
-        
-        # Send message with buttons only - no redundant text question
-        message = f"I'm currently set as {current_name}."
-        
+        # Ask for new name directly
         await self._send_or_edit_message(
             update,
-            message,
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            "What name would you like me to use?",
+            reply_markup=None
         )
         
         return NAME_INPUT

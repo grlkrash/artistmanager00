@@ -36,46 +36,39 @@ class GoalHandlers(BaseBotHandler):
         """Get goal-related handlers."""
         return [
             CommandHandler("goals", self.show_menu),
-            CallbackQueryHandler(self.handle_goal_callback, pattern="^(menu_goals|goal_.*|goal_menu)$"),
+            CallbackQueryHandler(self.handle_callback, pattern="^(menu_goals|goal_.*|goal_menu)$"),
             self.get_conversation_handler()
         ]
 
-    async def handle_goal_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle goal-related callbacks."""
         query = update.callback_query
         await query.answer()
         
         try:
-            # Handle both goal_ and menu_goals patterns
-            original_data = query.data
-            action = query.data.replace("goal_", "").replace("menu_goals", "menu")
-            logger.info(f"Goal handler processing callback: {original_data} -> {action}")
+            action = query.data.replace("menu_goals", "").replace("goal_", "").strip("_")
             
-            if action == "menu":
-                logger.info("Showing goals menu")
+            if action == "menu" or action == "":
                 await self.show_menu(update, context)
-            elif action == "add":
-                logger.info("Showing add goal interface")
-                await self._show_add_goal(update, context)
-            elif action == "view_all":
-                logger.info("Showing all goals")
-                await self._show_all_goals(update, context)
-            elif action == "back":
-                logger.info("Returning to main menu")
-                await self.bot.show_menu(update, context)
-            elif action.startswith("manage_"):
-                goal_id = action.replace("manage_", "")
-                logger.info(f"Managing goal: {goal_id}")
-                await self._show_goal_management(update, context, goal_id)
-            elif action.startswith("priority_"):
-                logger.info(f"Handling goal priority: {action}")
-                await self.handle_goal_priority(update, context)
+            elif action == "create":
+                await self.start_goal_creation(update, context)
+            elif action == "list":
+                await self.list_goals(update, context)
+            elif action == "complete":
+                await self.mark_goal_complete(update, context)
             else:
-                logger.warning(f"Unknown action in goal handler: {action}")
-                await self._handle_error(update)
+                logger.warning(f"Unknown goal action: {action}")
+                await self.show_menu(update, context)
+            
         except Exception as e:
-            logger.error(f"Error in goal callback handler: {str(e)}", exc_info=True)
-            await self._handle_error(update)
+            logger.error(f"Error handling goal callback: {str(e)}")
+            await self._send_or_edit_message(
+                update,
+                "Sorry, something went wrong. Please try again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="menu_goals")
+                ]])
+            )
 
     async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show the goals menu."""
@@ -350,7 +343,7 @@ class GoalHandlers(BaseBotHandler):
                 AWAITING_GOAL_DATE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_goal_date)
                 ]
-            ],
+            },
             fallbacks=[
                 CommandHandler("cancel", self.cancel_goal_creation)
             ],

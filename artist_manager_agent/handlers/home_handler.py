@@ -22,12 +22,11 @@ class HomeHandlers(BaseBotHandler):
         self.group = 9  # Set handler group
 
     def get_handlers(self) -> List[BaseHandler]:
-        """Get home-related handlers."""
+        """Get home menu handlers."""
         return [
-            CommandHandler('start', self.start),
-            CommandHandler('menu', self.show_menu),
-            CallbackQueryHandler(self.show_menu, pattern="^menu_main$"),
-            CallbackQueryHandler(self.handle_menu_callback, pattern="^(menu_.*|core_.*|feature_.*)$")
+            CommandHandler("home", self.show_menu),
+            CallbackQueryHandler(self.show_menu, pattern="^home_menu$"),
+            CallbackQueryHandler(self.handle_menu_callback, pattern="^home_(.*|menu_.*)$")
         ]
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
