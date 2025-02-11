@@ -11,12 +11,13 @@ from telegram import Update
 import uuid
 import threading
 from typing import Optional, Dict, Any
+from telegram.ext import CallbackQueryHandler
 
 from .models import ArtistProfile
 from .bot_main import ArtistManagerBot
 from .log import logger
 from .handlers.name_change_handler import get_name_change_handler
-from .handlers.home_handler import get_home_handler
+from .handlers.home_handler import get_home_handlers
 
 # Load environment variables
 load_dotenv()
@@ -87,7 +88,12 @@ async def initialize_bot(bot: ArtistManagerBot) -> None:
                 achievements=[],
                 social_media={},
                 streaming_profiles={},
-                brand_guidelines="Default guidelines"
+                brand_guidelines={
+                    "description": "Default brand guidelines",
+                    "colors": [],
+                    "fonts": [],
+                    "tone": "professional"
+                }
             )
             bot.profiles["default"] = default_profile
             
@@ -95,11 +101,19 @@ async def initialize_bot(bot: ArtistManagerBot) -> None:
         logger.info("Registering handlers...")
         application = bot.application
         
-        # Add name change handler
-        application.add_handler(get_name_change_handler())
+        # Add name change handlers
+        name_change_handler = get_name_change_handler()
+        application.add_handler(name_change_handler)
         
-        # Add home handler
-        application.add_handler(get_home_handler())
+        # Add home handlers
+        for handler in get_home_handlers():
+            application.add_handler(handler)
+            
+        # Add global callback handler last
+        application.add_handler(
+            CallbackQueryHandler(bot.handle_callback),
+            group=999
+        )
         
         logger.info("All handlers registered successfully")
         
@@ -144,9 +158,12 @@ def main():
         asyncio.set_event_loop(loop)
         
         try:
+            # Create and initialize bot
+            bot = ArtistManagerBot()
+            
             # Run the bot
-            bot = get_bot_instance()
             loop.run_until_complete(run_bot(bot))
+            
         except KeyboardInterrupt:
             logger.info("Bot stopped by user")
         except Exception as e:
@@ -154,7 +171,7 @@ def main():
             raise
         finally:
             try:
-                # Clean up
+                # Clean up any remaining tasks
                 tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
                 for task in tasks:
                     task.cancel()
