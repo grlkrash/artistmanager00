@@ -163,6 +163,19 @@ class ArtistManagerBotBase:
             logger.info("Loading persistence data...")
             await self.persistence.load()
             
+            # Load profiles from persistence
+            if hasattr(self.persistence, 'bot_data'):
+                logger.info("Checking for profiles in persistence...")
+                if 'profiles' in self.persistence.bot_data:
+                    self.profiles = self.persistence.bot_data['profiles']
+                    logger.info(f"Loaded {len(self.profiles)} profiles from persistence")
+                    logger.debug(f"Profile IDs in memory: {list(self.profiles.keys())}")
+                else:
+                    logger.info("No profiles found in persistence, initializing empty profiles")
+                    self.persistence.bot_data['profiles'] = self.profiles
+            else:
+                logger.warning("Persistence has no bot_data attribute")
+                
             # 2. Register handlers in correct order
             logger.info("Registering handlers...")
             self._register_handlers()

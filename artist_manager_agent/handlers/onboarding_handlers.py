@@ -97,8 +97,10 @@ class OnboardingHandlers(BaseHandlerMixin):
         return [
             CommandHandler("start", self.start_onboarding),
             CommandHandler("onboard", self.start_onboarding),
-            CallbackQueryHandler(self.handle_dashboard_callback, pattern="^(newproject|social|goals|analytics|events|show_commands|start_tutorial|show_dashboard)$"),
-            self.get_conversation_handler()
+            CallbackQueryHandler(
+                self.handle_dashboard_callback,
+                pattern="^(onboard_|dashboard_menu|dashboard_back|profile_setup)"
+            )
         ]
 
     def get_conversation_handler(self) -> ConversationHandler:
@@ -612,43 +614,21 @@ class OnboardingHandlers(BaseHandlerMixin):
         return streaming
 
     async def handle_social_media(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle social media input."""
-        text = update.message.text.strip()
-        
-        # Parse social media handles
-        social_media = self._parse_social_media(text)
-        if social_media:
-            context.user_data['social_media'] = social_media
-        
-        # Show what was understood
-        if social_media:
-            confirmation = "I understood these social media profiles:\n\n"
-            for platform, handle in social_media.items():
-                confirmation += f"• {platform.title()}: {handle}\n"
-            confirmation += "\nIs this correct? (Yes/No)"
-            
-            keyboard = [["Yes", "No"]]
+        """Handle social media profile input."""
+        try:
             await update.message.reply_text(
-                confirmation,
-                reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+                "Enter your social media profiles (one per line):\n"
+                "You can use any format:\n"
+                "• Instagram: @handle\n"
+                "• @handle - Twitter\n"
+                "• TikTok @handle",
+                reply_markup=ForceReply(selective=True)
             )
             return AWAITING_SOCIAL_MEDIA
             
-        # Move to next step
-        await update.message.reply_text(
-            "Great! Now for your streaming platform profiles.\n"
-            "You can:\n"
-            "• Paste links directly\n"
-            "• List platform name and link\n"
-            "• Use any format (Spotify: link or Spotify - link etc)\n\n"
-            "Example:\n"
-            "spotify.com/artist/...\n"
-            "Apple Music: music.apple.com/...\n"
-            "soundcloud - soundcloud.com/...\n\n"
-            "Or type 'skip' to skip this step.",
-            reply_markup=ForceReply(selective=True)
-        )
-        return AWAITING_STREAMING_PROFILES
+        except Exception as e:
+            logger.error(f"Error handling social media input: {str(e)}")
+            return ConversationHandler.END
 
     async def handle_streaming_profiles(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle streaming profiles input."""
@@ -883,7 +863,7 @@ class OnboardingHandlers(BaseHandlerMixin):
         keyboard = []
         for action, description, command in suggestions["quick_actions"][:3]:  # Show top 3
             message += f"• {action}: {description}\n"
-            keyboard.append([InlineKeyboardButton(action, callback_data=command[1:])])  # Remove / from command
+            keyboard.append([InlineKeyboardButton(action, callback_data=f"dashboard_{command[1:]}")])  # Remove / from command
             
         message += "\n📚 Available Tutorials:\n"
         for tutorial in suggestions["tutorials"][:3]:
@@ -895,9 +875,9 @@ class OnboardingHandlers(BaseHandlerMixin):
             
         # Add navigation buttons
         keyboard.extend([
-            [InlineKeyboardButton("View All Commands", callback_data="show_commands")],
-            [InlineKeyboardButton("View Profile", callback_data="profile_view")],
-            [InlineKeyboardButton("Start Tutorial", callback_data="start_tutorial")]
+            [InlineKeyboardButton("View All Commands", callback_data="dashboard_show_commands")],
+            [InlineKeyboardButton("View Profile", callback_data="dashboard_profile_view")],
+            [InlineKeyboardButton("Start Tutorial", callback_data="dashboard_start_tutorial")]
         ])
         
         await update.message.reply_text(
@@ -911,9 +891,21 @@ class OnboardingHandlers(BaseHandlerMixin):
         
         if choice == 'confirm profile':
             try:
+                user_id = str(update.effective_user.id)
+                logger.info(f"Creating profile for user {user_id}")
+                
+                # Check if profile already exists
+                if user_id in self.bot.profiles:
+                    logger.info(f"Profile already exists for user {user_id}")
+                    await update.message.reply_text(
+                        "You already have a profile set up. Would you like to update it instead?\n"
+                        "Use /me to view your current profile and /update to make changes."
+                    )
+                    return ConversationHandler.END
+                
                 # Create ArtistProfile object
                 profile = ArtistProfile(
-                    id=str(update.effective_user.id),
+                    id=user_id,
                     name=context.user_data.get('name', ''),
                     genre=context.user_data.get('genre', ''),
                     career_stage=context.user_data.get('career_stage', ''),
@@ -934,7 +926,17 @@ class OnboardingHandlers(BaseHandlerMixin):
                 )
                 
                 # Save profile
-                self.bot.profiles[str(update.effective_user.id)] = profile
+                self.bot.profiles[user_id] = profile
+                logger.info(f"Saved profile to memory for user {user_id}")
+                
+                # Save to persistence
+                if self.bot.persistence:
+                    self.bot.persistence.bot_data['profiles'] = self.bot.profiles
+                    await self.bot.persistence._backup_data()
+                    logger.info(f"Saved profile for user {user_id} to persistence")
+                    logger.info(f"Current profiles in persistence: {list(self.bot.persistence.bot_data['profiles'].keys())}")
+                else:
+                    logger.warning("No persistence available for saving profile")
                 
                 # Analyze profile and get suggestions
                 suggestions = await self._analyze_profile_and_suggest(profile)
@@ -1075,158 +1077,43 @@ class OnboardingHandlers(BaseHandlerMixin):
     async def handle_dashboard_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle callbacks from the personalized dashboard."""
         query = update.callback_query
-        await query.answer()  # Acknowledge the button click
         
         try:
-            # Get user profile
-            user_id = str(update.effective_user.id)
-            profile = self.bot.profiles.get(user_id)
-            if not profile:
-                await query.message.reply_text(
-                    "Sorry, I couldn't find your profile. Please use /start to set up your profile."
-                )
-                return
-                
-            # Handle different actions
-            if query.data == "newproject":
-                # Create new project
-                await query.message.reply_text(
-                    "Let's create your first project! 🚀\n\n"
-                    "I'll guide you through setting up a new project step by step."
-                )
-                await self.bot.project_handlers.start_project_creation(query.message, context)
-                
-            elif query.data == "social":
-                # Social media management
-                social_profiles = profile.social_media
-                if not social_profiles:
-                    message = (
-                        "I notice you haven't added any social media profiles yet.\n"
-                        "Would you like to add them now?"
-                    )
-                    keyboard = [[
-                        InlineKeyboardButton("Add Profiles", callback_data="profile_edit_social"),
-                        InlineKeyboardButton("Skip for Now", callback_data="show_menu")
-                    ]]
-                else:
-                    message = "Here are your current social media profiles:\n\n"
-                    for platform, handle in social_profiles.items():
-                        message += f"• {platform.title()}: {handle}\n"
-                    message += "\nWhat would you like to do?"
-                    keyboard = [[
-                        InlineKeyboardButton("Update Profiles", callback_data="profile_edit_social"),
-                        InlineKeyboardButton("View Analytics", callback_data="social_analytics")
-                    ]]
-                
-                await query.message.edit_text(
-                    message,
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-                
-            elif query.data == "goals":
-                # Goal management
-                goals = profile.goals
-                if not goals:
-                    message = "Let's set up some goals for your music career!"
-                else:
-                    message = "Here are your current goals:\n\n"
-                    for goal in goals:
-                        message += f"• {goal}\n"
-                    message += "\nWould you like to update them or track progress?"
-                    
-                keyboard = [[
-                    InlineKeyboardButton("Set New Goals", callback_data="goal_create"),
-                    InlineKeyboardButton("Track Progress", callback_data="goal_progress")
-                ]]
-                await query.message.edit_text(
-                    message,
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-                
-            elif query.data == "analytics":
-                # Show analytics dashboard
-                await query.message.edit_text(
-                    "📊 Analytics Dashboard\n\n"
-                    "I'll help you track your growth across platforms:\n"
-                    "• Social media engagement\n"
-                    "• Streaming performance\n"
-                    "• Goal progress\n"
-                    "• Project milestones",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("View Details", callback_data="show_analytics"),
-                        InlineKeyboardButton("Back to Menu", callback_data="show_menu")
-                    ]])
-                )
-                
-            elif query.data == "events":
-                # Event planning
-                await query.message.edit_text(
-                    "🎵 Event Planning\n\n"
-                    "I can help you:\n"
-                    "• Schedule performances\n"
-                    "• Track event details\n"
-                    "• Manage bookings\n"
-                    "• Coordinate with venues",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("Schedule Event", callback_data="event_create"),
-                        InlineKeyboardButton("View Calendar", callback_data="event_calendar")
-                    ]])
-                )
-                
-            elif query.data == "show_commands":
-                # Show all available commands
-                commands = (
-                    "🎵 Available Commands:\n\n"
-                    "Core Commands:\n"
-                    "/start - Start/restart bot\n"
-                    "/help - Show this help message\n"
-                    "/menu - Show main menu\n\n"
-                    "Project Management:\n"
-                    "/newproject - Create new project\n"
-                    "/projects - View all projects\n\n"
-                    "Goal Tracking:\n"
-                    "/goals - Manage goals\n"
-                    "/progress - Track progress\n\n"
-                    "Team Management:\n"
-                    "/team - Manage team\n"
-                    "/tasks - Manage tasks\n\n"
-                    "Analytics:\n"
-                    "/analytics - View analytics\n"
-                    "/reports - Generate reports"
-                )
-                await query.message.edit_text(
-                    commands,
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("Back to Dashboard", callback_data="show_dashboard")
-                    ]])
-                )
-                
-            elif query.data == "start_tutorial":
-                # Start interactive tutorial
-                await query.message.edit_text(
-                    "Welcome to the Artist Manager Tutorial! 🎓\n\n"
-                    "I'll guide you through the key features:\n"
-                    "1. Project Management\n"
-                    "2. Goal Tracking\n"
-                    "3. Team Coordination\n"
-                    "4. Analytics & Reporting\n\n"
-                    "Where would you like to start?",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Project Management", callback_data="tutorial_projects")],
-                        [InlineKeyboardButton("Goal Tracking", callback_data="tutorial_goals")],
-                        [InlineKeyboardButton("Team Coordination", callback_data="tutorial_team")],
-                        [InlineKeyboardButton("Analytics", callback_data="tutorial_analytics")],
-                        [InlineKeyboardButton("Skip Tutorial", callback_data="show_menu")]
-                    ])
-                )
-                
-            elif query.data == "show_dashboard":
-                # Show dashboard again
-                suggestions = await self._analyze_profile_and_suggest(profile)
-                await self._show_quick_start_dashboard(query.message, profile, suggestions)
+            # Enhanced logging
+            logger.info(f"Received callback: {query.data}")
+            logger.info(f"From user: {update.effective_user.id}")
+            logger.info(f"Message ID: {query.message.message_id}")
+            
+            # Acknowledge the callback first
+            await query.answer()
+            
+            # Route to appropriate handler based on prefix
+            callback_data = query.data
+            logger.info(f"Routing callback: {callback_data}")
+            
+            if callback_data.startswith("goal_"):
+                await self.bot.goal_handlers.handle_goal_callback(update, context)
+            elif callback_data.startswith("project_"):
+                await self.bot.project_handlers.handle_project_callback(update, context)
+            elif callback_data.startswith("task_"):
+                await self.bot.task_handlers.handle_task_callback(update, context)
+            elif callback_data.startswith("team_"):
+                await self.bot.team_handlers.handle_team_callback(update, context)
+            elif callback_data.startswith("auto_"):
+                await self.bot.auto_handlers.handle_auto_callback(update, context)
+            elif callback_data.startswith("blockchain_"):
+                await self.bot.blockchain_handlers.handle_blockchain_callback(update, context)
+            elif callback_data.startswith("music_"):
+                await self.bot.music_handlers.handle_music_callback(update, context)
+            elif callback_data.startswith(("dashboard_", "menu_", "profile_")):
+                # Handle dashboard/menu actions
+                await self._handle_dashboard_action(update, context, callback_data)
+            else:
+                logger.warning(f"Unhandled callback pattern: {callback_data}")
+                await query.message.reply_text("This feature is not implemented yet.")
                 
         except Exception as e:
-            logger.error(f"Error handling dashboard callback: {str(e)}")
+            logger.error(f"Error handling callback: {str(e)}", exc_info=True)
             await query.message.reply_text(
                 "Sorry, something went wrong. Please try again or use /help to see available commands."
             ) 

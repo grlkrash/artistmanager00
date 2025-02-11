@@ -2,6 +2,8 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.ext import ContextTypes
 import logging
+from typing import List
+from .models import ArtistProfile
 
 logger = logging.getLogger(__name__)
 
@@ -95,4 +97,35 @@ class Dashboard:
                 )
         except Exception as e:
             logger.error(f"Error in profile callback: {str(e)}")
-            await query.answer("Error processing profile action") 
+            await query.answer("Error processing profile action")
+
+    def get_quick_action_buttons(self, profile: ArtistProfile) -> List[List[InlineKeyboardButton]]:
+        """Get quick action buttons based on profile."""
+        buttons = []
+        
+        # Core actions
+        buttons.append([
+            InlineKeyboardButton("Create Goal", callback_data="goal_create"),
+            InlineKeyboardButton("New Project", callback_data="project_create")
+        ])
+        
+        # Music actions
+        buttons.append([
+            InlineKeyboardButton("Release Music", callback_data="music_release"),
+            InlineKeyboardButton("Team", callback_data="team_view")
+        ])
+        
+        # Analytics and settings
+        buttons.append([
+            InlineKeyboardButton("Analytics", callback_data="auto_analytics"),
+            InlineKeyboardButton("Settings", callback_data="profile_settings")
+        ])
+        
+        return buttons
+
+    def get_navigation_buttons(self) -> List[List[InlineKeyboardButton]]:
+        """Get navigation buttons."""
+        return [
+            [InlineKeyboardButton("Back to Menu", callback_data="dashboard_back")],
+            [InlineKeyboardButton("Help", callback_data="onboard_help")]
+        ] 
