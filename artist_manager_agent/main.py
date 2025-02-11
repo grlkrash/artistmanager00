@@ -10,10 +10,13 @@ from dotenv import load_dotenv
 from telegram import Update
 import uuid
 import threading
+from typing import Optional, Dict, Any
 
 from .models import ArtistProfile
 from .bot_main import ArtistManagerBot
 from .log import logger
+from .handlers.name_change_handler import get_name_change_handler
+from .handlers.home_handler import get_home_handler
 
 # Load environment variables
 load_dotenv()
@@ -68,18 +71,13 @@ def get_bot_instance() -> ArtistManagerBot:
             _bot_instance = ArtistManagerBot()
         return _bot_instance
 
-async def run_bot():
-    """Run the bot."""
-    global _stop_event
-    
+async def initialize_bot(bot: ArtistManagerBot) -> None:
+    """Initialize the bot with proper error handling."""
     try:
-        # Get bot instance
-        bot = get_bot_instance()
-        
-        # Create default profile if needed
-        if not bot.default_profile:
+        # Create default profile if none exists
+        if not bot.profiles:
             default_profile = ArtistProfile(
-                id=str(uuid.uuid4()),
+                id="default",
                 name="Default Artist",
                 genre="Unknown",
                 career_stage="Unknown",
@@ -89,54 +87,53 @@ async def run_bot():
                 achievements=[],
                 social_media={},
                 streaming_profiles={},
-                brand_guidelines={
-                    "description": "Default brand guidelines",
-                    "colors": [],
-                    "fonts": [],
-                    "tone": "professional"
-                }
+                brand_guidelines="Default guidelines"
             )
-            bot.default_profile = default_profile
+            bot.profiles["default"] = default_profile
+            
+        # Register handlers
+        logger.info("Registering handlers...")
+        application = bot.application
         
-        # Initialize the application
-        logger.info("Starting bot...")
+        # Add name change handler
+        application.add_handler(get_name_change_handler())
         
-        # Initialize application first
-        if not bot.application._initialized:
-            await bot.application.initialize()
+        # Add home handler
+        application.add_handler(get_home_handler())
         
-        # Start polling with clean state
-        logger.info("Starting polling...")
-        if not bot.application.updater.running:
-            await bot.application.updater.start_polling(
-                drop_pending_updates=True,
-                allowed_updates=["message", "callback_query", "inline_query"]
-            )
+        logger.info("All handlers registered successfully")
         
-        # Create stop event
-        _stop_event = asyncio.Event()
+    except Exception as e:
+        logger.error(f"Error during initialization: {str(e)}")
+        raise
+
+async def run_bot(bot: ArtistManagerBot) -> None:
+    """Run the bot with proper lifecycle management."""
+    try:
+        # Initialize bot
+        await initialize_bot(bot)
         
-        # Wait for stop signal
-        await _stop_event.wait()
+        # Start polling
+        await bot.start()
+        
+        # Set up signal handlers
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(bot.stop()))
+            
+        # Keep the bot running
+        stop_event = asyncio.Event()
+        await stop_event.wait()
         
     except Exception as e:
         logger.error(f"Error running bot: {str(e)}")
         raise
     finally:
-        # Ensure cleanup happens
-        try:
-            if bot and hasattr(bot, 'application'):
-                logger.info("Stopping bot...")
-                if hasattr(bot.application, 'updater') and bot.application.updater.running:
-                    await bot.application.updater.stop()
-                if bot.application.running:
-                    await bot.application.stop()
-                    await bot.application.shutdown()
-        except Exception as e:
-            logger.error(f"Error stopping bot: {str(e)}")
+        # Ensure proper cleanup
+        await bot.stop()
 
 def main():
-    """Entry point for the bot."""
+    """Main entry point."""
     try:
         # Set up asyncio policy for Windows if needed
         if sys.platform == "win32":
@@ -148,11 +145,12 @@ def main():
         
         try:
             # Run the bot
-            loop.run_until_complete(run_bot())
+            bot = get_bot_instance()
+            loop.run_until_complete(run_bot(bot))
         except KeyboardInterrupt:
             logger.info("Bot stopped by user")
         except Exception as e:
-            logger.error(f"Error running bot: {str(e)}")
+            logger.error(f"Fatal error: {str(e)}")
             raise
         finally:
             try:
