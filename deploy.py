@@ -9,6 +9,7 @@ from pathlib import Path
 from artist_manager_agent.bot_main import ArtistManagerBot
 from artist_manager_agent.models import ArtistProfile
 from artist_manager_agent.log import logger, log_event, log_error
+import uuid
 
 # Configure logging
 logging.basicConfig(
@@ -121,9 +122,9 @@ def main():
             
         # Create empty artist profile for now
         artist_profile = ArtistProfile(
-            id="default",
+            id=str(uuid.uuid4()),  # Make sure ID is a string
             name="Artist",
-            genre="",
+            genre="Unknown",
             career_stage="emerging",
             goals=[],
             strengths=[],

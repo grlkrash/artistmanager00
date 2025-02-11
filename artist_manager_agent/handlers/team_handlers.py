@@ -14,9 +14,10 @@ from telegram.ext import (
     BaseHandler
 )
 from ..models import CollaboratorProfile, PaymentRequest
-from .base_handler import BaseHandlerMixin
+from .base_handler import BaseBotHandler
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Conversation states
 AWAITING_MEMBER_NAME = "AWAITING_MEMBER_NAME"
@@ -27,59 +28,112 @@ AWAITING_MEMBER_SKILLS = "AWAITING_MEMBER_SKILLS"
 AWAITING_PAYMENT_AMOUNT = "AWAITING_PAYMENT_AMOUNT"
 AWAITING_PAYMENT_DESCRIPTION = "AWAITING_PAYMENT_DESCRIPTION"
 
-class TeamHandlers(BaseHandlerMixin):
-    """Team management handlers."""
-    
-    group = 6  # Handler group for registration
+class TeamHandlers(BaseBotHandler):
+    """Handlers for team-related functionality."""
     
     def __init__(self, bot):
-        self.bot = bot
+        super().__init__(bot)
+        self.group = 8  # Set handler group
 
     def get_handlers(self) -> List[BaseHandler]:
         """Get team-related handlers."""
         return [
-            CommandHandler("team", self.show_team),
-            CommandHandler("addmember", self.start_member_addition),
-            CommandHandler("payments", self.show_payments),
-            self.get_conversation_handler(),
-            CallbackQueryHandler(self.handle_team_callback, pattern="^team_")
+            CommandHandler("team", self.show_menu),
+            CallbackQueryHandler(self.handle_team_callback, pattern="^(menu_team|team_.*|team_menu)$")
         ]
 
-    def get_conversation_handler(self) -> ConversationHandler:
-        """Get the conversation handler for team management."""
-        return ConversationHandler(
-            entry_points=[
-                CallbackQueryHandler(self.start_member_addition, pattern="^team_add$"),
-                CommandHandler("addmember", self.start_member_addition)
+    async def handle_team_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle team-related callbacks."""
+        query = update.callback_query
+        await query.answer()
+        
+        try:
+            # Handle both team_ and menu_team patterns
+            original_data = query.data
+            action = query.data.replace("team_", "").replace("menu_team", "menu").replace("team_menu", "menu")
+            logger.info(f"Team handler processing callback: {original_data} -> {action}")
+            
+            if action == "menu":
+                logger.info("Showing team menu")
+                await self.show_menu(update, context)
+            elif action == "add":
+                logger.info("Showing add member interface")
+                await self._show_add_member(update, context)
+            elif action == "view_all":
+                logger.info("Showing all members")
+                await self._show_all_members(update, context)
+            elif action == "back":
+                logger.info("Returning to main menu")
+                await self.bot.show_menu(update, context)
+            else:
+                logger.warning(f"Unknown action in team handler: {action}")
+                await self._send_or_edit_message(
+                    update,
+                    "This feature is coming soon!",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("« Back", callback_data="team_menu")
+                    ]])
+                )
+        except Exception as e:
+            logger.error(f"Error in team callback handler: {str(e)}", exc_info=True)
+            await self._send_or_edit_message(
+                update,
+                "Sorry, something went wrong. Please try again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="team_menu")
+                ]])
+            )
+
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the team menu."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Add Member", callback_data="team_add"),
+                InlineKeyboardButton("View Team", callback_data="team_view_all")
             ],
-            states={
-                AWAITING_MEMBER_NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_member_name)
-                ],
-                AWAITING_MEMBER_ROLE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_member_role)
-                ],
-                AWAITING_MEMBER_EMAIL: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_member_email)
-                ],
-                AWAITING_MEMBER_RATE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_member_rate)
-                ],
-                AWAITING_MEMBER_SKILLS: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_member_skills)
-                ],
-                AWAITING_PAYMENT_AMOUNT: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_payment_amount)
-                ],
-                AWAITING_PAYMENT_DESCRIPTION: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_payment_description)
-                ]
-            },
-            fallbacks=[
-                CommandHandler("cancel", self.cancel_team_action)
+            [
+                InlineKeyboardButton("Team Analytics", callback_data="team_analytics"),
+                InlineKeyboardButton("Manage Roles", callback_data="team_roles")
             ],
-            name="team_management",
-            persistent=True
+            [InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "👥 *Team Management*\n\n"
+            "What would you like to do?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    async def _show_add_member(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show member addition interface."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Producer", callback_data="team_role_producer"),
+                InlineKeyboardButton("Engineer", callback_data="team_role_engineer")
+            ],
+            [
+                InlineKeyboardButton("Manager", callback_data="team_role_manager"),
+                InlineKeyboardButton("Custom Role", callback_data="team_role_custom")
+            ],
+            [InlineKeyboardButton("« Back", callback_data="team_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "What role would you like to add to your team?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _show_all_members(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show all team members."""
+        keyboard = [[InlineKeyboardButton("« Back", callback_data="team_menu")]]
+        
+        await self._send_or_edit_message(
+            update,
+            "Your team members will appear here soon!",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
     async def show_team(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -303,31 +357,6 @@ class TeamHandlers(BaseHandlerMixin):
             await update.message.reply_text(
                 "Sorry, there was an error loading payments. Please try again."
             )
-
-    async def handle_team_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle team-related callbacks."""
-        query = update.callback_query
-        await query.answer()
-        
-        action = query.data.replace("team_", "")
-        
-        if action == "add":
-            await self.start_member_addition(update, context)
-            
-        elif action == "view":
-            await self.show_team(update, context)
-            
-        elif action.startswith("manage_"):
-            member_id = action.replace("manage_", "")
-            await self._show_member_management(update, context, member_id)
-            
-        elif action.startswith("payment_"):
-            payment_action = action.replace("payment_", "")
-            if payment_action == "create":
-                await self._start_payment_request(update, context)
-            elif payment_action.startswith("review_"):
-                payment_id = payment_action.replace("review_", "")
-                await self._review_payment_request(update, context, payment_id)
 
     async def _show_member_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE, member_id: str) -> None:
         """Show member management options."""

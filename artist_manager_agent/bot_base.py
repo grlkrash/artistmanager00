@@ -30,7 +30,7 @@ from .models import (
     MasteringPreset,
     DistributionPlatform
 )
-from .log import logger, log_event
+from .utils import logger, log_event
 from .auto_mode import AutoMode
 from .project_manager import ProjectManager
 from .task_manager_integration import TaskManagerIntegration
@@ -67,6 +67,10 @@ from .config import (
     DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS
 )
 import threading
+from .handlers.core_handlers import CoreHandlers
+from .handlers.onboarding_handlers import OnboardingHandlers
+from .handlers.home_handler import HomeHandlers
+from .handlers.name_change_handler import NameChangeHandlers
 
 class CoreHandlers(BaseHandlerMixin):
     """Core command handlers."""
@@ -101,9 +105,23 @@ class ArtistManagerBot:
     
     def __init__(self, db_url=None):
         """Initialize the bot."""
-        if self._initialized:
-            return
-            
+        self._initialized = False
+        self.profiles = {}
+        self.db_url = db_url
+        
+        # Initialize handlers as None
+        self.onboarding = None
+        self.core_handlers = None
+        self.goal_handlers = None
+        self.task_handlers = None
+        self.project_handlers = None
+        self.music_handlers = None
+        self.blockchain_handlers = None
+        self.auto_handlers = None
+        self.team_handlers = None
+        self.home_handlers = None
+        self.name_change_handlers = None
+        
         try:
             with self._lock:
                 if not self._initialized:
@@ -117,7 +135,6 @@ class ArtistManagerBot:
                     self.task_manager = None
                     self.token = BOT_TOKEN
                     self.default_profile = None
-                    self.profiles = {}
                     self.config = {
                         "persistence_path": PERSISTENCE_PATH,
                         "model": DEFAULT_MODEL,
@@ -165,23 +182,30 @@ class ArtistManagerBot:
             logger.info("Initializing handler registry...")
             self.handler_registry = HandlerRegistry()
             
-            # 4. Initialize all other components
-            logger.info("Initializing bot components...")
-            self.team_manager = TeamManager(team_id="default")
-            self.team_handlers = TeamHandlers(self)
+            # 4. Initialize all handlers in correct order
+            logger.info("Initializing bot handlers...")
             self.onboarding = OnboardingHandlers(self)
-            self.dashboard = Dashboard(self)
-            self.ai_handler = AIHandler(model=self.config["model"])
-            self.auto_mode = AutoMode(self)
-            self.auto_handlers = AutoHandlers(self)
-            self.project_manager = ProjectManager(self)
-            self.project_handlers = ProjectHandlers(self)
-            self.task_manager_integration = TaskManagerIntegration(self.persistence)
+            self.core_handlers = CoreHandlers(self)
             self.goal_handlers = GoalHandlers(self)
             self.task_handlers = TaskHandlers(self)
-            self.blockchain_handlers = BlockchainHandlers(self)
+            self.project_handlers = ProjectHandlers(self)
             self.music_handlers = MusicHandlers(self)
-            self.core_handlers = CoreHandlers(self)
+            self.blockchain_handlers = BlockchainHandlers(self)
+            self.auto_handlers = AutoHandlers(self)
+            self.team_handlers = TeamHandlers(self)
+            self.home_handlers = HomeHandlers(self)
+            self.name_change_handlers = NameChangeHandlers(self)
+            
+            # 5. Initialize supporting components
+            logger.info("Initializing supporting components...")
+            self.team_manager = TeamManager(team_id="default")
+            self.dashboard = Dashboard(self)
+            self.project_manager = ProjectManager(self)
+            self.task_manager_integration = TaskManagerIntegration(self.persistence)
+            
+            # 6. Register all handlers
+            logger.info("Registering handlers...")
+            self._register_handlers()
             
             logger.info("All components initialized successfully")
             
@@ -189,265 +213,144 @@ class ArtistManagerBot:
             logger.error(f"Error initializing components: {str(e)}")
             raise
             
-    async def _register_and_load(self):
-        """Register handlers and load persistence data."""
-        try:
-            # 1. Load persistence data first
-            logger.info("Loading persistence data...")
-            await self.persistence.load()
-            
-            # Load profiles from persistence
-            if hasattr(self.persistence, 'bot_data'):
-                logger.info("Checking for profiles in persistence...")
-                if 'profiles' in self.persistence.bot_data:
-                    self.profiles = self.persistence.bot_data['profiles']
-                    logger.info(f"Loaded {len(self.profiles)} profiles from persistence")
-                    logger.debug(f"Profile IDs in memory: {list(self.profiles.keys())}")
-                else:
-                    logger.info("No profiles found in persistence, initializing empty profiles")
-                    self.persistence.bot_data['profiles'] = self.profiles
-            else:
-                logger.warning("Persistence has no bot_data attribute")
-                
-            # 2. Register handlers in correct order
-            logger.info("Registering handlers...")
-            self._register_handlers()
-            
-            # 3. Load task manager data
-            logger.info("Loading task manager data...")
-            await self.task_manager_integration.load_from_persistence()
-            
-            logger.info("All data loaded and handlers registered")
-            
-        except Exception as e:
-            logger.error(f"Error during registration and loading: {str(e)}")
-            raise
-            
     def _register_handlers(self):
         """Register all handlers with the registry."""
         try:
-            # Validate handler dependencies first
-            logger.info("Validating handler dependencies...")
+            # Clear any existing handlers
+            if hasattr(self.application, 'handlers'):
+                self.application.handlers.clear()
+                logger.info("Cleared existing handlers")
+            
+            # Register handlers in priority order
             handlers = [
-                (0, self.core_handlers, "Core handlers"),
-                (1, self.onboarding, "Onboarding handlers"),
-                (2, self.goal_handlers, "Goal handlers"),
-                (3, self.project_handlers, "Project handlers"),
-                (4, self.blockchain_handlers, "Blockchain handlers"),
-                (5, self.auto_handlers, "Auto mode handlers"),
-                (6, self.team_handlers, "Team handlers"),
-                (7, self.music_handlers, "Music handlers"),
-                (8, self.task_handlers, "Task handlers")
+                (0, self.onboarding.get_handlers(), "Onboarding handlers"),
+                (1, self.core_handlers.get_handlers(), "Core handlers"),
+                (2, self.goal_handlers.get_handlers(), "Goal handlers"),
+                (3, self.task_handlers.get_handlers(), "Task handlers"),
+                (4, self.project_handlers.get_handlers(), "Project handlers"),
+                (5, self.music_handlers.get_handlers(), "Music handlers"),
+                (6, self.blockchain_handlers.get_handlers(), "Blockchain handlers"),
+                (7, self.auto_handlers.get_handlers(), "Auto mode handlers"),
+                (8, self.team_handlers.get_handlers(), "Team handlers"),
+                (9, self.home_handlers.get_handlers(), "Home handlers"),
+                (10, self.name_change_handlers.get_handlers(), "Name change handlers")
             ]
             
-            # Verify all handlers exist
-            for group, handler, name in handlers:
-                if not handler:
-                    raise ValueError(f"{name} not initialized")
-                
-            # Register handlers in order
-            logger.info("Registering handlers in order...")
-            for group, handler, name in handlers:
-                try:
-                    logger.debug(f"Registering {name} (group {group})")
-                    self.handler_registry.register_handler(group, handler)
-                except Exception as e:
-                    logger.error(f"Error registering {name}: {str(e)}")
-                    raise
-                
-            # Register all handlers with the application
-            logger.info("Registering handlers with application...")
-            self.handler_registry.register_all(self.application)
+            # Register each handler group
+            for group, handler_list, name in handlers:
+                if not handler_list:
+                    logger.warning(f"{name} not available")
+                    continue
+                    
+                for handler in handler_list:
+                    if handler is not None:
+                        logger.info(f"Registering {name} in group {group}")
+                        self.application.add_handler(handler, group=group)
+                    else:
+                        logger.warning(f"Null handler found in {name}")
             
-            # Register core command handlers directly
-            logger.info("Registering core command handlers...")
-            self.application.add_handler(CommandHandler("help", self.help))
-            self.application.add_handler(CommandHandler("menu", self.show_menu))
-            
-            # Register global callback handler last
-            logger.info("Registering global callback handler...")
-            self.application.add_handler(
-                CallbackQueryHandler(self.handle_callback),
-                group=999  # Make this the last handler to process callbacks
-            )
-            
+            # Register error handler last
+            self.application.add_error_handler(self._error_handler)
             logger.info("All handlers registered successfully")
             
         except Exception as e:
             logger.error(f"Error registering handlers: {str(e)}")
             raise
-            
-    async def start(self):
-        """Start the bot with proper initialization sequence."""
-        try:
-            # Check if already running
-            if hasattr(self, '_running') and self._running:
-                logger.warning("Bot is already running")
-                return
-                
-            # 1. Register handlers and load data
-            await self._register_and_load()
-            
-            # 2. Initialize application
-            logger.info("Initializing application...")
-            if not self.application._initialized:
-                await self.application.initialize()
-            
-            # 3. Clean up only conversation states
-            logger.info("Cleaning up old conversation states...")
-            if hasattr(self.persistence, 'chat_data'):
-                for chat_id in self.persistence.chat_data:
-                    if 'conversation_state' in self.persistence.chat_data[chat_id]:
-                        del self.persistence.chat_data[chat_id]['conversation_state']
-            if hasattr(self.persistence, 'user_data'):
-                for user_id in self.persistence.user_data:
-                    if 'conversation_state' in self.persistence.user_data[user_id]:
-                        del self.persistence.user_data[user_id]['conversation_state']
-            await self.persistence._backup_data()
-            
-            # 4. Start application if not already started
-            logger.info("Starting application...")
-            if not self.application.running:
-                await self.application.start()
-            
-            # 5. Start polling with clean state
-            logger.info("Starting polling with clean state...")
-            if hasattr(self.application, 'updater') and not self.application.updater.running:
-                await self.application.updater.start_polling(
-                    drop_pending_updates=True,
-                    allowed_updates=["message", "callback_query", "inline_query"]
-                )
-            
-            self._running = True
-            logger.info("Bot started successfully")
-            
-        except Exception as e:
-            logger.error(f"Error starting bot: {str(e)}")
-            # Try to clean up if possible
-            try:
-                if hasattr(self, 'application'):
-                    if hasattr(self.application, 'updater') and self.application.updater.running:
-                        await self.application.updater.stop()
-                    if self.application.running:
-                        await self.application.stop()
-                        await self.application.shutdown()
-            except Exception as cleanup_error:
-                logger.error(f"Error during cleanup: {str(cleanup_error)}")
-            raise
-            
-    async def stop(self):
-        """Stop the bot with proper cleanup sequence."""
-        try:
-            if not hasattr(self, '_running') or not self._running:
-                logger.warning("Bot is not running")
-                return
-                
-            logger.info("Stopping bot...")
-            
-            # 1. Stop polling first
-            if hasattr(self.application, 'updater') and self.application.updater.running:
-                logger.info("Stopping updater...")
-                await self.application.updater.stop()
-            
-            # 2. Stop application
-            if self.application.running:
-                logger.info("Stopping application...")
-                await self.application.stop()
-            
-            # 3. Final cleanup
-            logger.info("Performing final cleanup...")
-            await self.application.shutdown()
-            if hasattr(self.persistence, '_backup_data'):
-                await self.persistence._backup_data()
-            
-            self._running = False
-            logger.info("Bot stopped successfully")
-            
-        except Exception as e:
-            logger.error(f"Error stopping bot: {str(e)}")
-            # Set running to false even if cleanup fails
-            self._running = False
-            raise
 
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle callback queries from inline buttons."""
+    async def _error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle errors in updates."""
+        try:
+            error = context.error
+            logger.error(f"Update {update} caused error {error}")
+            
+            if update and update.effective_message:
+                error_message = "Sorry, something went wrong. Please try again."
+                if isinstance(error, TimeoutError):
+                    error_message = "Request timed out. Please try again."
+                elif isinstance(error, NetworkError):
+                    error_message = "Network error occurred. Please check your connection."
+                
+                await update.effective_message.reply_text(
+                    error_message,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("« Back to Menu", callback_data="menu_main")
+                    ]])
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in error handler: {str(e)}")
+
+    async def handle_menu_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle menu-related callbacks."""
         query = update.callback_query
+        await query.answer()
         
         try:
-            # Try to answer the callback query first to prevent timeout
-            try:
-                await query.answer()
-            except Exception as e:
-                logger.warning(f"Could not answer callback query: {str(e)}")
+            action = query.data.replace("menu_", "")
             
-            # Log the callback for debugging
-            logger.info(f"Global callback handler received: {query.data}")
-            
-            if query.data.startswith("onboard_"):
-                # Route to onboarding handlers
-                logger.info("Routing to onboarding handlers")
-                return await self.onboarding.handle_onboard_callback(update, context)
-            elif query.data.startswith("goal_"):
-                await self.goal_handlers.handle_goal_callback(update, context)
-            elif query.data.startswith("auto_"):
-                await self.auto_handlers.handle_auto_callback(update, context)
-            elif query.data.startswith("profile_"):
-                await self.handle_profile_callback(query)
-            elif query.data.startswith("blockchain_"):
-                await self.blockchain_handlers.handle_blockchain_callback(update, context)
-            elif query.data.startswith("music_"):
-                await self.music_handlers.handle_music_callback(update, context)
-            elif query.data.startswith("dashboard_"):
-                await self.dashboard.handle_dashboard_callback(update, context)
-            elif query.data == "help":
-                await self.help(update, context)
+            if action == "goals":
+                await self.goal_handlers.show_menu(update, context)
+            elif action == "tasks":
+                await self.task_handlers.show_menu(update, context)
+            elif action == "projects":
+                await self.project_handlers.show_menu(update, context)
+            elif action == "music":
+                await self.music_handlers.show_menu(update, context)
+            elif action == "team":
+                await self.team_handlers.show_menu(update, context)
+            elif action == "auto":
+                await self.auto_handlers.show_menu(update, context)
+            elif action == "blockchain":
+                await self.blockchain_handlers.show_menu(update, context)
+            elif action == "profile":
+                await self.show_profile(update, context)
+            elif action == "main":
+                await self.show_menu(update, context)
             else:
-                # Log unknown callback data
-                logger.warning(f"Unknown callback data: {query.data}")
-                await query.message.reply_text(
-                    "Sorry, I don't recognize that command. Please try again or use /help for available commands."
-                )
+                logger.warning(f"Unknown menu action: {action}")
+                await self.show_menu(update, context)
                 
         except Exception as e:
-            logger.error(f"Error handling callback: {str(e)}")
+            logger.error(f"Error handling menu callback: {str(e)}")
             await query.message.reply_text(
-                "Sorry, something went wrong. Please try again or use /help for available commands."
+                "Sorry, something went wrong. Please try again."
             )
-
-    async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Show help message."""
-        await update.message.reply_text(
-            self.help_message,
-            parse_mode="Markdown"
-        )
 
     async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show main menu."""
         keyboard = [
             [
-                InlineKeyboardButton("Goals 🎯", callback_data="goal_menu"),
-                InlineKeyboardButton("Tasks 📝", callback_data="task_menu")
+                InlineKeyboardButton("Goals 🎯", callback_data="menu_goals"),
+                InlineKeyboardButton("Tasks 📝", callback_data="menu_tasks")
             ],
             [
-                InlineKeyboardButton("Projects 🚀", callback_data="project_menu"),
-                InlineKeyboardButton("Music 🎵", callback_data="music_menu")
+                InlineKeyboardButton("Projects 🚀", callback_data="menu_projects"),
+                InlineKeyboardButton("Music 🎵", callback_data="menu_music")
             ],
             [
-                InlineKeyboardButton("Team 👥", callback_data="team_menu"),
-                InlineKeyboardButton("Auto Mode ⚙️", callback_data="auto_menu")
+                InlineKeyboardButton("Team 👥", callback_data="menu_team"),
+                InlineKeyboardButton("Auto Mode ⚙️", callback_data="menu_auto")
             ],
             [
-                InlineKeyboardButton("Blockchain 🔗", callback_data="blockchain_menu"),
-                InlineKeyboardButton("Profile 👤", callback_data="profile_menu")
+                InlineKeyboardButton("Blockchain 🔗", callback_data="menu_blockchain"),
+                InlineKeyboardButton("Profile 👤", callback_data="menu_profile")
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "🎵 *Welcome to Artist Manager Bot* 🎵\n\n"
-            "What would you like to manage today?",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        
+        message = "🎵 *Welcome to Artist Manager Bot* 🎵\n\nWhat would you like to manage today?"
+        
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
 
     async def view_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """View artist profile."""
@@ -543,4 +446,40 @@ class ArtistManagerBot:
             )
         except Exception as e:
             self.logger.error(f"Error starting polling: {e}")
+            raise 
+
+    async def _register_and_load(self):
+        """Register handlers and load persistence data."""
+        try:
+            # 1. Load persistence data first
+            logger.info("Loading persistence data...")
+            if hasattr(self.persistence, 'load'):
+                await self.persistence.load()
+            
+            # Load profiles from persistence
+            if hasattr(self.persistence, 'bot_data'):
+                logger.info("Checking for profiles in persistence...")
+                if 'profiles' in self.persistence.bot_data:
+                    self.profiles = self.persistence.bot_data['profiles']
+                    logger.info(f"Loaded {len(self.profiles)} profiles from persistence")
+                    logger.debug(f"Profile IDs in memory: {list(self.profiles.keys())}")
+                else:
+                    logger.info("No profiles found in persistence, initializing empty profiles")
+                    self.persistence.bot_data['profiles'] = self.profiles
+            else:
+                logger.warning("Persistence has no bot_data attribute")
+                
+            # 2. Register handlers in correct order
+            logger.info("Registering handlers...")
+            self._register_handlers()
+            
+            # 3. Load task manager data
+            logger.info("Loading task manager data...")
+            if hasattr(self, 'task_manager_integration'):
+                await self.task_manager_integration.load_from_persistence()
+            
+            logger.info("All data loaded and handlers registered")
+            
+        except Exception as e:
+            logger.error(f"Error during registration and loading: {str(e)}")
             raise 

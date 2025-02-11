@@ -2,11 +2,14 @@
 from typing import Optional, Dict, Any, List
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from .log import logger
+from .utils.logger import logger
 
 class GoalsMixin:
     """Mixin class to handle goal-related functionality."""
     
+    def __init__(self):
+        self.goals = {}
+        
     async def goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle the /goals command - show current goals and progress."""
         try:

@@ -1,17 +1,8 @@
 # Artist Manager Bot
 
-A Telegram bot powered by AI to help manage artists' careers.
+A Telegram bot designed to help artists manage their career, social media presence, and streaming profiles.
 
-## Features
-
-- 🎵 Artist onboarding wizard
-- 🎯 Goal tracking and management
-- 📅 Event scheduling
-- 💰 Financial tracking
-- 📊 Analytics and reporting
-- 🔗 Blockchain integration
-
-## Local Development
+## Setup
 
 1. Clone the repository:
 ```bash
@@ -21,8 +12,8 @@ cd artistmanager00
 
 2. Create and activate a virtual environment:
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
 3. Install dependencies:
@@ -30,18 +21,30 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Create a `.env` file with your configuration:
-```env
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+4. Create a `.env` file with your credentials:
+```
+TELEGRAM_BOT_TOKEN=your_bot_token
 OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-3.5-turbo
-DATABASE_URL=sqlite:///artist_manager.db
-LOG_LEVEL=INFO
 ```
 
 5. Run the bot:
 ```bash
-python deploy.py
+python -m artist_manager_agent
+```
+
+## Features
+
+- Personalized onboarding process
+- Career stage assessment and guidance
+- Social media profile management
+- Streaming platform integration
+- Goal setting and tracking
+
+## Development
+
+To install in development mode:
+```bash
+pip install -e .
 ```
 
 ## Vercel Deployment

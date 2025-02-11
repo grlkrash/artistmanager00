@@ -3,7 +3,9 @@ import asyncio
 from functools import wraps
 from typing import Any, Callable, Type, Union, List
 import time
-from .log import log_error, log_event
+from .logger import get_logger, log_event, log_error
+
+logger = get_logger(__name__)
 
 def async_retry(
     retries: int = 3,

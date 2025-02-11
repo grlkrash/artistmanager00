@@ -1,121 +1,75 @@
 """Main entry point for the Artist Manager Bot."""
 import os
 import sys
-import signal
 import asyncio
 import logging
-from datetime import datetime
 from pathlib import Path
-from dotenv import load_dotenv
-from telegram import Update
-import uuid
-import threading
-from typing import Optional, Dict, Any
-from telegram.ext import CallbackQueryHandler
 
-from .models import ArtistProfile
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    PicklePersistence
+)
+
 from .bot_main import ArtistManagerBot
-from .log import logger
-from .handlers.name_change_handler import get_name_change_handler
-from .handlers.home_handler import get_home_handlers
+from .utils.logger import get_logger, setup_logging
+from .utils.config import (
+    BOT_TOKEN,
+    DATA_DIR,
+    PERSISTENCE_PATH,
+    LOG_LEVEL,
+    LOG_FORMAT
+)
 
-# Load environment variables
-load_dotenv()
+logger = get_logger(__name__)
 
-# Global state
-_bot_instance = None
-_bot_lock = threading.Lock()
-_stop_event = None
-
-def get_required_env(key: str) -> str:
-    """Get a required environment variable or exit."""
-    value = os.getenv(key)
-    if not value:
-        logger.error(f"Missing required environment variable: {key}")
-        sys.exit(1)
-    return value
-
-async def shutdown(sig, loop, bot=None):
-    """Cleanup tasks tied to the service's shutdown."""
-    logger.info(f"Received exit signal {signal.name}")
-    
+async def cleanup_resources(bot: ArtistManagerBot) -> None:
+    """Cleanup resources before shutdown."""
     try:
-        # Stop the bot first if it exists
-        if bot:
-            logger.info("Stopping bot...")
-            try:
-                await bot.stop()
-            except Exception as e:
-                logger.error(f"Error stopping bot: {str(e)}")
-        
-        # Cancel all tasks
-        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        if tasks:
-            logger.info(f"Cancelling {len(tasks)} outstanding tasks")
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Stop the event loop
-        loop.stop()
-        
+        logger.info("Cleaning up bot resources...")
+        # Save persistence data
+        if hasattr(bot, 'persistence') and bot.persistence:
+            await bot.persistence.flush()
+        # Close any open connections
+        if hasattr(bot, 'application'):
+            await bot.application.shutdown()
     except Exception as e:
-        logger.error(f"Error during shutdown: {str(e)}")
-    finally:
-        logger.info("Shutdown complete")
-
-def get_bot_instance() -> ArtistManagerBot:
-    """Get or create the bot instance."""
-    global _bot_instance
-    with _bot_lock:
-        if _bot_instance is None:
-            _bot_instance = ArtistManagerBot()
-        return _bot_instance
+        logger.error(f"Error during cleanup: {str(e)}")
 
 async def initialize_bot(bot: ArtistManagerBot) -> None:
     """Initialize the bot with proper error handling."""
     try:
-        # Create default profile if none exists
-        if not bot.profiles:
-            default_profile = ArtistProfile(
-                id="default",
-                name="Default Artist",
-                genre="Unknown",
-                career_stage="Unknown",
-                goals=[],
-                strengths=[],
-                areas_for_improvement=["Not specified"],
-                achievements=[],
-                social_media={},
-                streaming_profiles={},
-                brand_guidelines={
-                    "description": "Default brand guidelines",
-                    "colors": [],
-                    "fonts": [],
-                    "tone": "professional"
-                }
-            )
-            bot.profiles["default"] = default_profile
+        logger.info("Starting bot initialization...")
+        
+        # 1. Clear existing state
+        if hasattr(bot, 'application') and bot.application:
+            logger.info("Shutting down existing application...")
+            await bot.application.shutdown()
+            bot.application.handlers.clear()
             
-        # Register handlers
-        logger.info("Registering handlers...")
-        application = bot.application
+        # 2. Reset initialization flags
+        bot._initialized = False
+        logger.info("Reset initialization flags")
         
-        # Add name change handlers
-        name_change_handler = get_name_change_handler()
-        application.add_handler(name_change_handler)
+        # 3. Clear any existing handler instances
+        bot.onboarding = None
+        bot.core_handlers = None
+        bot.goal_handlers = None
+        bot.task_handlers = None
+        bot.project_handlers = None
+        bot.music_handlers = None
+        bot.blockchain_handlers = None
+        bot.auto_handlers = None
+        bot.team_handlers = None
+        bot.home_handlers = None
+        bot.name_change_handlers = None
+        logger.info("Cleared existing handler instances")
         
-        # Add home handlers
-        for handler in get_home_handlers():
-            application.add_handler(handler)
-            
-        # Add global callback handler last
-        application.add_handler(
-            CallbackQueryHandler(bot.handle_callback),
-            group=999
-        )
-        
-        logger.info("All handlers registered successfully")
+        # 4. Initialize components and register handlers
+        await bot._register_and_load()
+        logger.info("Completed bot initialization")
         
     except Exception as e:
         logger.error(f"Error during initialization: {str(e)}")
@@ -127,67 +81,40 @@ async def run_bot(bot: ArtistManagerBot) -> None:
         # Initialize bot
         await initialize_bot(bot)
         
-        # Start polling
-        await bot.start()
-        
-        # Set up signal handlers
-        loop = asyncio.get_event_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(bot.stop()))
-            
-        # Keep the bot running
-        stop_event = asyncio.Event()
-        await stop_event.wait()
+        # Start polling with clean state
+        logger.info("Starting polling...")
+        await bot.application.start_polling(
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query", "inline_query"],
+            close_loop=False
+        )
         
     except Exception as e:
         logger.error(f"Error running bot: {str(e)}")
         raise
     finally:
-        # Ensure proper cleanup
-        await bot.stop()
+        await cleanup_resources(bot)
 
 def main():
-    """Main entry point."""
+    """Main entry point for the bot."""
     try:
-        # Set up asyncio policy for Windows if needed
-        if sys.platform == "win32":
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        # Set up logging
+        setup_logging(LOG_LEVEL, LOG_FORMAT)
+        logger.info("Starting Artist Manager Bot...")
         
-        # Create new event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Create data directory if it doesn't exist
+        data_dir = Path(DATA_DIR)
+        data_dir.mkdir(parents=True, exist_ok=True)
         
-        try:
-            # Create and initialize bot
-            bot = ArtistManagerBot()
-            
-            # Run the bot
-            loop.run_until_complete(run_bot(bot))
-            
-        except KeyboardInterrupt:
-            logger.info("Bot stopped by user")
-        except Exception as e:
-            logger.error(f"Fatal error: {str(e)}")
-            raise
-        finally:
-            try:
-                # Clean up any remaining tasks
-                tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
-                for task in tasks:
-                    task.cancel()
-                
-                # Wait for tasks to complete with timeout
-                if tasks:
-                    loop.run_until_complete(
-                        asyncio.wait(tasks, timeout=5)
-                    )
-                
-                # Close the loop
-                loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.close()
-            except Exception as e:
-                logger.error(f"Error during cleanup: {str(e)}")
-            
+        # Initialize bot
+        bot = ArtistManagerBot(BOT_TOKEN, data_dir)
+        
+        # Run the bot
+        asyncio.run(run_bot(bot))
+        
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+        sys.exit(0)
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
         sys.exit(1)

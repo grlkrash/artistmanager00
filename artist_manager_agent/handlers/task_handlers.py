@@ -14,9 +14,10 @@ from telegram.ext import (
     BaseHandler
 )
 from ..models import Task
-from .base_handler import BaseHandlerMixin
+from .base_handler import BaseBotHandler
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Conversation states
 AWAITING_TASK_TITLE = "AWAITING_TASK_TITLE"
@@ -24,20 +25,19 @@ AWAITING_TASK_PRIORITY = "AWAITING_TASK_PRIORITY"
 AWAITING_TASK_DESCRIPTION = "AWAITING_TASK_DESCRIPTION"
 AWAITING_TASK_DUE_DATE = "AWAITING_TASK_DUE_DATE"
 
-class TaskHandlers(BaseHandlerMixin):
+class TaskHandlers(BaseBotHandler):
     """Task management handlers."""
     
-    group = 8  # Handler group for registration
-    
     def __init__(self, bot):
-        self.bot = bot
+        super().__init__(bot)
+        self.group = 3  # Set handler group
 
     def get_handlers(self) -> List[BaseHandler]:
         """Get task-related handlers."""
         return [
-            CommandHandler("tasks", self.show_task_menu),
-            self.get_conversation_handler(),
-            CallbackQueryHandler(self.handle_task_callback, pattern="^task_")
+            CommandHandler("tasks", self.show_menu),
+            CallbackQueryHandler(self.handle_task_callback, pattern="^(menu_tasks|task_.*|task_menu)$"),
+            self.get_conversation_handler()
         ]
 
     def get_conversation_handler(self) -> ConversationHandler:
@@ -65,10 +65,14 @@ class TaskHandlers(BaseHandlerMixin):
                 CommandHandler("cancel", self.cancel_task_creation)
             ],
             name="task_creation",
-            persistent=True
+            persistent=True,
+            per_message=True,
+            per_chat=False,
+            per_user=True,
+            allow_reentry=True
         )
 
-    async def show_task_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show the main task management menu."""
         try:
             keyboard = [
@@ -79,10 +83,12 @@ class TaskHandlers(BaseHandlerMixin):
                 [
                     InlineKeyboardButton("Complete Task", callback_data="task_complete"),
                     InlineKeyboardButton("Task Analytics", callback_data="task_analytics")
-                ]
+                ],
+                [InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]
             ]
             
-            await update.message.reply_text(
+            await self._send_or_edit_message(
+                update,
                 "📋 Task Management:\n\n"
                 "• Create new tasks\n"
                 "• View and manage tasks\n"
@@ -93,36 +99,41 @@ class TaskHandlers(BaseHandlerMixin):
             
         except Exception as e:
             logger.error(f"Error showing task menu: {str(e)}")
-            await update.message.reply_text(
-                "Sorry, there was an error loading the task menu. Please try again later."
-            )
+            await self._handle_error(update)
 
     async def handle_task_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle task-related callbacks."""
         query = update.callback_query
         await query.answer()
         
-        action = query.data.replace("task_", "")
-        
-        if action == "create":
-            return await self.start_task_creation(query.message, context)
-        elif action == "complete":
-            await self.show_task_completion_options(query.message, context)
-        elif action == "view":
-            await self.show_task_details(query.message, context)
-        elif action == "edit":
-            await self.show_task_edit_options(query.message, context)
-        elif action == "analytics":
-            await self.show_task_analytics(query.message, context)
-        elif action.startswith("view_"):
-            task_id = action.replace("view_", "")
-            await self.show_specific_task(query.message, context, task_id)
-        elif action.startswith("complete_"):
-            task_id = action.replace("complete_", "")
-            await self.complete_task(query.message, context, task_id)
-        elif action.startswith("edit_"):
-            task_id = action.replace("edit_", "")
-            await self.edit_task(query.message, context, task_id)
+        try:
+            # Handle both task_ and menu_tasks patterns
+            original_data = query.data
+            action = query.data.replace("task_", "").replace("menu_tasks", "menu")
+            logger.info(f"Task handler processing callback: {original_data} -> {action}")
+            
+            if action == "menu":
+                logger.info("Showing tasks menu")
+                await self.show_menu(update, context)
+            elif action == "add" or action == "create":
+                logger.info("Starting task creation")
+                await self.start_task_creation(update, context)
+            elif action == "view_all" or action == "view":
+                logger.info("Showing task details")
+                await self.show_task_details(update, context)
+            elif action == "back":
+                logger.info("Returning to main menu")
+                await self.bot.show_menu(update, context)
+            elif action.startswith("manage_"):
+                task_id = action.replace("manage_", "")
+                logger.info(f"Managing task: {task_id}")
+                await self._show_task_management(update, context, task_id)
+            else:
+                logger.warning(f"Unknown action in task handler: {action}")
+                await self._handle_error(update)
+        except Exception as e:
+            logger.error(f"Error in task callback handler: {str(e)}", exc_info=True)
+            await self._handle_error(update)
 
     async def start_task_creation(self, message: Message, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Start the task creation process."""

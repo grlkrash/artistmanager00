@@ -17,8 +17,10 @@ import uuid
 from typing import Dict, Optional
 from telegram import Message
 from ..models import NetworkType
+from .base_handler import BaseBotHandler
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Conversation states for wallet
 AWAITING_WALLET_ADDRESS = "AWAITING_WALLET_ADDRESS"
@@ -51,277 +53,123 @@ AWAITING_TOKEN_DECIMALS = "AWAITING_TOKEN_DECIMALS"
     AWAITING_TX_DATES
 ) = range(7)
 
-class BlockchainHandlers(BaseHandlerMixin):
+class BlockchainHandlers(BaseBotHandler):
     """Handlers for blockchain-related functionality."""
     
-    group = 3  # Handler group for registration
-    
     def __init__(self, bot):
-        self.bot = bot
+        super().__init__(bot)
+        self.group = 6  # Set handler group
 
     def get_handlers(self) -> List[BaseHandler]:
         """Get blockchain-related handlers."""
         return [
-            CommandHandler("blockchain", self.show_blockchain_options),
-            CommandHandler("wallet", self.handle_wallet),
-            CommandHandler("nft", self.handle_deploy_nft),
-            CommandHandler("token", self.handle_deploy_token),
-            CallbackQueryHandler(self.handle_blockchain_callback, pattern="^blockchain_"),
-            
-            # Token swap conversation handler
-            ConversationHandler(
-                entry_points=[CommandHandler("swap", self.swap_tokens)],
-                states={
-                    AWAITING_SWAP_FROM_TOKEN: [
-                        CallbackQueryHandler(
-                            self.handle_swap_from_token,
-                            pattern="^blockchain_swap_from_"
-                        )
-                    ],
-                    AWAITING_SWAP_TO_TOKEN: [
-                        CallbackQueryHandler(
-                            self.handle_swap_to_token,
-                            pattern="^blockchain_swap_to_"
-                        )
-                    ],
-                    AWAITING_SWAP_AMOUNT: [
-                        MessageHandler(
-                            filters.TEXT & ~filters.COMMAND,
-                            self.handle_swap_amount
-                        )
-                    ],
-                    AWAITING_SWAP_ROUTE: [
-                        CallbackQueryHandler(
-                            self.handle_swap_route,
-                            pattern="^blockchain_swap_route_"
-                        ),
-                        CallbackQueryHandler(
-                            self.cancel_swap,
-                            pattern="^blockchain_swap_cancel$"
-                        )
-                    ]
-                },
-                fallbacks=[
-                    CommandHandler("cancel", self.cleanup_operation),
-                    CallbackQueryHandler(
-                        self.cleanup_operation,
-                        pattern="^blockchain_cancel$"
-                    )
-                ]
-            ),
-            
-            # Gas price conversation handler
-            ConversationHandler(
-                entry_points=[
-                    CallbackQueryHandler(
-                        self.handle_gas_action,
-                        pattern="^blockchain_gas_custom$"
-                    )
-                ],
-                states={
-                    AWAITING_GAS_PRICE: [
-                        MessageHandler(
-                            filters.TEXT & ~filters.COMMAND,
-                            self.handle_gas_price_input
-                        )
-                    ]
-                },
-                fallbacks=[
-                    CommandHandler("cancel", self.cleanup_operation),
-                    CallbackQueryHandler(
-                        self.cleanup_operation,
-                        pattern="^blockchain_cancel$"
-                    )
-                ]
-            ),
-            
-            # Transaction date range conversation handler
-            ConversationHandler(
-                entry_points=[
-                    CallbackQueryHandler(
-                        self.handle_tx_action,
-                        pattern="^blockchain_tx_dates$"
-                    )
-                ],
-                states={
-                    AWAITING_TX_DATES: [
-                        MessageHandler(
-                            filters.TEXT & ~filters.COMMAND,
-                            self.handle_tx_date_input
-                        )
-                    ]
-                },
-                fallbacks=[
-                    CommandHandler("cancel", self.cleanup_operation),
-                    CallbackQueryHandler(
-                        self.cleanup_operation,
-                        pattern="^blockchain_cancel$"
-                    )
-                ]
-            ),
-            
-            # Callback query handlers
-            CallbackQueryHandler(
-                self.handle_tx_action,
-                pattern="^blockchain_tx_"
-            ),
-            CallbackQueryHandler(
-                self.handle_gas_action,
-                pattern="^blockchain_gas_"
-            ),
-            CallbackQueryHandler(
-                self.handle_tx_filter,
-                pattern="^blockchain_tx_filter_"
-            )
+            CommandHandler("blockchain", self.show_menu),
+            CallbackQueryHandler(self.handle_blockchain_callback, pattern="^(menu_blockchain|blockchain_.*|blockchain_menu)$")
         ]
-
-    async def show_blockchain_options(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Show blockchain-related options."""
-        try:
-            keyboard = [
-                [
-                    InlineKeyboardButton("Wallet", callback_data="blockchain_wallet"),
-                    InlineKeyboardButton("Deploy NFT", callback_data="blockchain_nft")
-                ],
-                [
-                    InlineKeyboardButton("Deploy Token", callback_data="blockchain_token"),
-                    InlineKeyboardButton("Settings", callback_data="blockchain_settings")
-                ]
-            ]
-            
-            await update.message.reply_text(
-                "🔗 Blockchain Options:\n\n"
-                "• Manage your crypto wallet\n"
-                "• Deploy NFT collections\n"
-                "• Create custom tokens\n"
-                "• Configure blockchain settings",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            
-        except Exception as e:
-            logger.error(f"Error showing blockchain options: {str(e)}")
-            await update.message.reply_text(
-                "Sorry, there was an error loading blockchain options. Please try again later."
-            )
-
-    async def handle_wallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle wallet management."""
-        try:
-            keyboard = [
-                [
-                    InlineKeyboardButton("View Balance", callback_data="blockchain_wallet_balance"),
-                    InlineKeyboardButton("Send", callback_data="blockchain_wallet_send")
-                ],
-                [
-                    InlineKeyboardButton("Receive", callback_data="blockchain_wallet_receive"),
-                    InlineKeyboardButton("History", callback_data="blockchain_wallet_history")
-                ]
-            ]
-            
-            await update.message.reply_text(
-                "💼 Wallet Management:\n\n"
-                "Select an option to manage your wallet:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            
-        except Exception as e:
-            logger.error(f"Error handling wallet: {str(e)}")
-            await update.message.reply_text(
-                "Sorry, there was an error accessing wallet functions. Please try again later."
-            )
-
-    async def handle_deploy_nft(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle NFT deployment."""
-        try:
-            keyboard = [
-                [
-                    InlineKeyboardButton("Create Collection", callback_data="blockchain_nft_create"),
-                    InlineKeyboardButton("Upload Art", callback_data="blockchain_nft_upload")
-                ],
-                [
-                    InlineKeyboardButton("Set Pricing", callback_data="blockchain_nft_price"),
-                    InlineKeyboardButton("Deploy", callback_data="blockchain_nft_deploy")
-                ]
-            ]
-            
-            await update.message.reply_text(
-                "🎨 NFT Deployment:\n\n"
-                "Create and deploy your NFT collection:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            
-        except Exception as e:
-            logger.error(f"Error handling NFT deployment: {str(e)}")
-            await update.message.reply_text(
-                "Sorry, there was an error with NFT deployment. Please try again later."
-            )
-
-    async def handle_deploy_token(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle token deployment."""
-        try:
-            keyboard = [
-                [
-                    InlineKeyboardButton("Create Token", callback_data="blockchain_token_create"),
-                    InlineKeyboardButton("Set Supply", callback_data="blockchain_token_supply")
-                ],
-                [
-                    InlineKeyboardButton("Configure", callback_data="blockchain_token_configure"),
-                    InlineKeyboardButton("Deploy", callback_data="blockchain_token_deploy")
-                ]
-            ]
-            
-            await update.message.reply_text(
-                "🪙 Token Deployment:\n\n"
-                "Create and deploy your custom token:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            
-        except Exception as e:
-            logger.error(f"Error handling token deployment: {str(e)}")
-            await update.message.reply_text(
-                "Sorry, there was an error with token deployment. Please try again later."
-            )
 
     async def handle_blockchain_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle blockchain-related callbacks."""
+        query = update.callback_query
+        await query.answer()
+        
         try:
-            query = update.callback_query
-            await query.answer()
+            # Handle both blockchain_ and menu_blockchain patterns
+            original_data = query.data
+            action = query.data.replace("blockchain_", "").replace("menu_blockchain", "menu").replace("blockchain_menu", "menu")
+            logger.info(f"Blockchain handler processing callback: {original_data} -> {action}")
             
-            action = query.data.replace("blockchain_", "")
-            
-            if action.startswith("wallet_"):
-                await self._handle_wallet_action(query, action)
-            elif action.startswith("nft_"):
-                await self._handle_nft_action(query, action)
-            elif action.startswith("token_"):
-                await self._handle_token_action(query, action)
+            if action == "menu":
+                logger.info("Showing blockchain menu")
+                await self.show_menu(update, context)
+            elif action == "wallet":
+                logger.info("Showing wallet interface")
+                await self._show_wallet(update, context)
+            elif action == "nft":
+                logger.info("Showing NFT options")
+                await self._show_nft_options(update, context)
+            elif action == "back":
+                logger.info("Returning to main menu")
+                await self.bot.show_menu(update, context)
             else:
-                await query.message.reply_text("This feature is coming soon!")
-                
+                logger.warning(f"Unknown action in blockchain handler: {action}")
+                await self._send_or_edit_message(
+                    update,
+                    "This feature is coming soon!",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("« Back", callback_data="blockchain_menu")
+                    ]])
+                )
         except Exception as e:
-            logger.error(f"Error handling blockchain callback: {str(e)}")
-            await update.effective_message.reply_text(
-                "Sorry, there was an error processing your request. Please try again later."
+            logger.error(f"Error in blockchain callback handler: {str(e)}", exc_info=True)
+            await self._send_or_edit_message(
+                update,
+                "Sorry, something went wrong. Please try again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="blockchain_menu")
+                ]])
             )
 
-    async def _handle_wallet_action(self, query: CallbackQuery, action: str) -> None:
-        """Handle wallet-specific actions."""
-        action = action.replace("wallet_", "")
-        # Implement wallet actions (balance, send, receive, history)
-        await query.message.reply_text(f"Wallet {action} feature coming soon!")
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the blockchain menu."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Wallet", callback_data="blockchain_wallet"),
+                InlineKeyboardButton("NFTs", callback_data="blockchain_nft")
+            ],
+            [
+                InlineKeyboardButton("Contracts", callback_data="blockchain_contracts"),
+                InlineKeyboardButton("Analytics", callback_data="blockchain_analytics")
+            ],
+            [InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "🔗 *Blockchain Management*\n\n"
+            "What would you like to do?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
 
-    async def _handle_nft_action(self, query: CallbackQuery, action: str) -> None:
-        """Handle NFT-specific actions."""
-        action = action.replace("nft_", "")
-        # Implement NFT actions (create, upload, price, deploy)
-        await query.message.reply_text(f"NFT {action} feature coming soon!")
+    async def _show_wallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show wallet interface."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Connect Wallet", callback_data="blockchain_wallet_connect"),
+                InlineKeyboardButton("View Balance", callback_data="blockchain_wallet_balance")
+            ],
+            [
+                InlineKeyboardButton("Send", callback_data="blockchain_wallet_send"),
+                InlineKeyboardButton("Receive", callback_data="blockchain_wallet_receive")
+            ],
+            [InlineKeyboardButton("« Back", callback_data="blockchain_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "Connect or manage your crypto wallet:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-    async def _handle_token_action(self, query: CallbackQuery, action: str) -> None:
-        """Handle token-specific actions."""
-        action = action.replace("token_", "")
-        # Implement token actions (create, supply, configure, deploy)
-        await query.message.reply_text(f"Token {action} feature coming soon!")
+    async def _show_nft_options(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show NFT options."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Create NFT", callback_data="blockchain_nft_create"),
+                InlineKeyboardButton("View Collection", callback_data="blockchain_nft_view")
+            ],
+            [
+                InlineKeyboardButton("Marketplace", callback_data="blockchain_nft_market"),
+                InlineKeyboardButton("Analytics", callback_data="blockchain_nft_analytics")
+            ],
+            [InlineKeyboardButton("« Back", callback_data="blockchain_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "Manage your NFTs and collections:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     async def show_transaction_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show transaction history."""

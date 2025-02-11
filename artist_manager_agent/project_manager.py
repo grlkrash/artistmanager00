@@ -1,10 +1,13 @@
+"""Project management functionality."""
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import uuid
 from .models import Project, Task, CollaboratorProfile, ResourceAllocation, BudgetEntry
-from .log import logger, log_error
+from .utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class ProjectManager:
     """Handles project management functionality."""

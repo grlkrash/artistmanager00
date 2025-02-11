@@ -14,9 +14,10 @@ from telegram.ext import (
     BaseHandler
 )
 from ..models import Goal
-from .base_handler import BaseHandlerMixin
+from .base_handler import BaseBotHandler
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Conversation states
 AWAITING_GOAL_TITLE = "AWAITING_GOAL_TITLE"
@@ -24,82 +25,138 @@ AWAITING_GOAL_DESCRIPTION = "AWAITING_GOAL_DESCRIPTION"
 AWAITING_GOAL_PRIORITY = "AWAITING_GOAL_PRIORITY"
 AWAITING_GOAL_DATE = "AWAITING_GOAL_DATE"
 
-class GoalHandlers(BaseHandlerMixin):
-    """Goal management handlers."""
-    
-    group = 1  # Handler group for registration
+class GoalHandlers(BaseBotHandler):
+    """Handlers for goal-related functionality."""
     
     def __init__(self, bot):
-        self.bot = bot
+        super().__init__(bot)
+        self.group = 2  # Set handler group
 
     def get_handlers(self) -> List[BaseHandler]:
         """Get goal-related handlers."""
         return [
-            CommandHandler("goals", self.goals),
+            CommandHandler("goals", self.show_menu),
+            CallbackQueryHandler(self.handle_goal_callback, pattern="^(menu_goals|goal_.*|goal_menu)$"),
             self.get_conversation_handler()
         ]
 
-    async def goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle the /goals command."""
+    async def handle_goal_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle goal-related callbacks."""
+        query = update.callback_query
+        await query.answer()
+        
         try:
-            # Get user profile
-            user_id = update.effective_user.id
-            profile = self.bot.profiles.get(user_id)
-            if not profile:
-                await update.message.reply_text(
-                    "Please set up your profile first using /me"
-                )
-                return
-
-            # Get goals from task manager
-            goals = await self.bot.task_manager_integration.get_goals(user_id)
+            # Handle both goal_ and menu_goals patterns
+            original_data = query.data
+            action = query.data.replace("goal_", "").replace("menu_goals", "menu")
+            logger.info(f"Goal handler processing callback: {original_data} -> {action}")
             
-            if not goals:
-                # Show empty state with option to create goals
-                keyboard = [
-                    [InlineKeyboardButton("Create New Goal", callback_data="goal_create")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await update.message.reply_text(
-                    "You don't have any goals set up yet.\nWould you like to create one?",
-                    reply_markup=reply_markup
-                )
-                return
-
-            # Format goals message with progress bars
-            message = "🎯 Your Goals:\n\n"
-            for goal in goals:
-                progress = goal.get_progress()
-                progress_bar = "▓" * int(progress/10) + "░" * (10 - int(progress/10))
-                status = "✅" if progress == 100 else "🔄"
-                
-                message += f"{status} {goal.title}\n"
-                message += f"[{progress_bar}] {progress}%\n"
-                message += f"Due: {goal.due_date.strftime('%Y-%m-%d')}\n\n"
-
-            # Add action buttons
-            keyboard = [
-                [
-                    InlineKeyboardButton("Create New Goal", callback_data="goal_create"),
-                    InlineKeyboardButton("Edit Goals", callback_data="goal_edit")
-                ],
-                [
-                    InlineKeyboardButton("View Details", callback_data="goal_details"),
-                    InlineKeyboardButton("Archive", callback_data="goal_archive")
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            await update.message.reply_text(
-                message,
-                reply_markup=reply_markup
-            )
-
+            if action == "menu":
+                logger.info("Showing goals menu")
+                await self.show_menu(update, context)
+            elif action == "add":
+                logger.info("Showing add goal interface")
+                await self._show_add_goal(update, context)
+            elif action == "view_all":
+                logger.info("Showing all goals")
+                await self._show_all_goals(update, context)
+            elif action == "back":
+                logger.info("Returning to main menu")
+                await self.bot.show_menu(update, context)
+            elif action.startswith("manage_"):
+                goal_id = action.replace("manage_", "")
+                logger.info(f"Managing goal: {goal_id}")
+                await self._show_goal_management(update, context, goal_id)
+            elif action.startswith("priority_"):
+                logger.info(f"Handling goal priority: {action}")
+                await self.handle_goal_priority(update, context)
+            else:
+                logger.warning(f"Unknown action in goal handler: {action}")
+                await self._handle_error(update)
         except Exception as e:
-            logger.error(f"Error in goals command: {str(e)}")
-            await update.message.reply_text(
-                "Sorry, there was an error fetching your goals. Please try again later."
+            logger.error(f"Error in goal callback handler: {str(e)}", exc_info=True)
+            await self._handle_error(update)
+
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the goals menu."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Create Goal", callback_data="goal_add"),
+                InlineKeyboardButton("View Goals", callback_data="goal_view_all")
+            ],
+            [
+                InlineKeyboardButton("Goal Analytics", callback_data="goal_analytics"),
+                InlineKeyboardButton("Archive Goals", callback_data="goal_archive")
+            ],
+            [InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "🎯 *Goals Management*\n\n"
+            "What would you like to do?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    async def _show_add_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show goal creation interface."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Quick Goal", callback_data="goal_quick"),
+                InlineKeyboardButton("Detailed Goal", callback_data="goal_detailed")
+            ],
+            [InlineKeyboardButton("« Back", callback_data="goal_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "How would you like to create your goal?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _show_all_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show all user goals."""
+        # Get user's goals
+        user_id = update.effective_user.id
+        goals = await self.bot.task_manager_integration.get_goals(user_id)
+        
+        if not goals:
+            keyboard = [
+                [InlineKeyboardButton("Create Goal", callback_data="goal_add")],
+                [InlineKeyboardButton("« Back", callback_data="goal_menu")]
+            ]
+            await self._send_or_edit_message(
+                update,
+                "You don't have any goals yet. Would you like to create one?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
+            return
+            
+        # Format goals message
+        message = "🎯 Your Goals:\n\n"
+        keyboard = []
+        
+        for goal in goals:
+            progress = goal.get_progress()
+            status = "✅" if progress == 100 else "🔄"
+            message += f"{status} {goal.title}\n"
+            message += f"Progress: {progress}%\n"
+            if goal.due_date:
+                message += f"Due: {goal.due_date.strftime('%Y-%m-%d')}\n"
+            message += "\n"
+            
+            keyboard.append([
+                InlineKeyboardButton(f"Manage: {goal.title[:20]}...", callback_data=f"goal_manage_{goal.id}")
+            ])
+            
+        keyboard.append([InlineKeyboardButton("« Back", callback_data="goal_menu")])
+        
+        await self._send_or_edit_message(
+            update,
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     async def start_goal_creation(self, message: Message, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Start the goal creation process."""
@@ -274,14 +331,11 @@ class GoalHandlers(BaseHandlerMixin):
         )
         return ConversationHandler.END
 
-    def get_conversation_handler(self):
+    def get_conversation_handler(self) -> ConversationHandler:
         """Get the conversation handler for goal creation."""
         return ConversationHandler(
             entry_points=[
-                CallbackQueryHandler(
-                    self.start_goal_creation,
-                    pattern="^goal_create$"
-                )
+                CallbackQueryHandler(self.start_goal_creation, pattern="^goal_create$")
             ],
             states={
                 AWAITING_GOAL_TITLE: [
@@ -296,7 +350,7 @@ class GoalHandlers(BaseHandlerMixin):
                 AWAITING_GOAL_DATE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_goal_date)
                 ]
-            },
+            ],
             fallbacks=[
                 CommandHandler("cancel", self.cancel_goal_creation)
             ],
@@ -319,7 +373,7 @@ class GoalHandlers(BaseHandlerMixin):
                 
             # Format analytics message
             message_text = (
-                "📊 *Goal Analytics*\n\n"
+                "🎯 *Goal Analytics*\n\n"
                 f"Total Goals: {analytics['total_goals']}\n"
                 f"Completed: {analytics['completed_goals']}\n"
                 f"In Progress: {analytics['in_progress_goals']}\n"
@@ -348,4 +402,25 @@ class GoalHandlers(BaseHandlerMixin):
             logger.error(f"Error showing goal analytics: {str(e)}")
             await message.reply_text(
                 "Sorry, there was an error retrieving goal analytics. Please try again later."
-            ) 
+            )
+
+    async def show_goals_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the goals menu."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Create Goal", callback_data="goal_add"),
+                InlineKeyboardButton("View Goals", callback_data="goal_view_all")
+            ],
+            [
+                InlineKeyboardButton("Goal Analytics", callback_data="goal_analytics"),
+                InlineKeyboardButton("Archive Goals", callback_data="goal_archive")
+            ],
+            [InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]
+        ]
+        
+        await update.callback_query.edit_message_text(
+            "🎯 *Goals Management*\n\n"
+            "What would you like to do?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        ) 

@@ -14,9 +14,10 @@ from telegram.ext import (
     BaseHandler
 )
 from ..models import Project
-from .base_handler import BaseHandlerMixin
+from .base_handler import BaseBotHandler
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Conversation states
 AWAITING_PROJECT_TITLE = "AWAITING_PROJECT_TITLE"
@@ -26,24 +27,108 @@ AWAITING_PROJECT_TIMELINE = "AWAITING_PROJECT_TIMELINE"
 AWAITING_PROJECT_TEAM = "AWAITING_PROJECT_TEAM"
 AWAITING_PROJECT_MILESTONES = "AWAITING_PROJECT_MILESTONES"
 
-class ProjectHandlers(BaseHandlerMixin):
-    """Project management handlers."""
-    
-    group = 2  # Handler group for registration
+class ProjectHandlers(BaseBotHandler):
+    """Handlers for project-related functionality."""
     
     def __init__(self, bot):
-        self.bot = bot
+        super().__init__(bot)
+        self.group = 4  # Set handler group
 
     def get_handlers(self) -> List[BaseHandler]:
         """Get project-related handlers."""
         return [
-            CommandHandler("projects", self.show_projects),
-            CommandHandler("newproject", self.start_project_creation),
-            self.get_conversation_handler(),
-            CallbackQueryHandler(self.handle_project_callback, pattern="^project_")
+            CommandHandler("projects", self.show_menu),
+            CallbackQueryHandler(self.handle_project_callback, pattern="^(menu_projects|project_.*|project_menu)$"),
+            self.get_conversation_handler()
         ]
 
-    def get_conversation_handler(self) -> ConversationHandler:
+    async def handle_project_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle project-related callbacks."""
+        query = update.callback_query
+        await query.answer()
+        
+        try:
+            # Handle both project_ and menu_projects patterns
+            original_data = query.data
+            action = query.data.replace("project_", "").replace("menu_projects", "menu")
+            logger.info(f"Project handler processing callback: {original_data} -> {action}")
+            
+            if action == "menu":
+                logger.info("Showing projects menu")
+                await self.show_menu(update, context)
+            elif action == "create":
+                logger.info("Showing create project interface")
+                await self._show_create_project(update, context)
+            elif action == "view_all":
+                logger.info("Showing all projects")
+                await self._show_all_projects(update, context)
+            elif action == "back":
+                logger.info("Returning to main menu")
+                await self.bot.show_menu(update, context)
+            elif action.startswith("manage_"):
+                project_id = action.replace("manage_", "")
+                logger.info(f"Managing project: {project_id}")
+                await self._show_project_management(update, context, project_id)
+            else:
+                logger.warning(f"Unknown action in project handler: {action}")
+                await self._handle_error(update)
+        except Exception as e:
+            logger.error(f"Error in project callback handler: {str(e)}", exc_info=True)
+            await self._handle_error(update)
+
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the projects menu."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Create Project", callback_data="project_create"),
+                InlineKeyboardButton("View Projects", callback_data="project_view_all")
+            ],
+            [
+                InlineKeyboardButton("Project Analytics", callback_data="project_analytics"),
+                InlineKeyboardButton("Archive Projects", callback_data="project_archive")
+            ],
+            [InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "🚀 *Project Management*\n\n"
+            "What would you like to do?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    async def _show_create_project(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show project creation interface."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Album Project", callback_data="project_type_album"),
+                InlineKeyboardButton("Tour Project", callback_data="project_type_tour")
+            ],
+            [
+                InlineKeyboardButton("Marketing Campaign", callback_data="project_type_marketing"),
+                InlineKeyboardButton("Custom Project", callback_data="project_type_custom")
+            ],
+            [InlineKeyboardButton("« Back", callback_data="project_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "What type of project would you like to create?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _show_all_projects(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show all user projects."""
+        keyboard = [[InlineKeyboardButton("« Back", callback_data="project_menu")]]
+        
+        await self._send_or_edit_message(
+            update,
+            "Your projects will appear here soon!",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def get_conversation_handler(self) -> ConversationHandler:
         """Get the conversation handler for project creation."""
         return ConversationHandler(
             entry_points=[
@@ -84,7 +169,8 @@ class ProjectHandlers(BaseHandlerMixin):
             profile = self.bot.profiles.get(user_id)
             
             if not profile:
-                await update.message.reply_text(
+                await self._send_or_edit_message(
+                    update,
                     "Please complete your profile setup first using /me"
                 )
                 return
@@ -94,7 +180,8 @@ class ProjectHandlers(BaseHandlerMixin):
             
             if not projects:
                 keyboard = [[InlineKeyboardButton("Create New Project", callback_data="project_create")]]
-                await update.message.reply_text(
+                await self._send_or_edit_message(
+                    update,
                     "No projects found. Would you like to create one?",
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
@@ -124,17 +211,17 @@ class ProjectHandlers(BaseHandlerMixin):
                 ])
 
             keyboard.append([InlineKeyboardButton("➕ Create New Project", callback_data="project_create")])
+            keyboard.append([InlineKeyboardButton("« Back", callback_data="project_menu")])
             
-            await update.message.reply_text(
+            await self._send_or_edit_message(
+                update,
                 message,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
                 
         except Exception as e:
             logger.error(f"Error showing projects: {str(e)}")
-            await update.message.reply_text(
-                "Sorry, there was an error loading your projects. Please try again."
-            )
+            await self._handle_error(update)
 
     async def start_project_creation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Start project creation flow."""
@@ -164,158 +251,6 @@ class ProjectHandlers(BaseHandlerMixin):
                 "Sorry, there was an error starting project creation. Please try again."
             )
             return ConversationHandler.END
-
-    async def handle_project_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle project-related callbacks."""
-        query = update.callback_query
-        await query.answer()
-        
-        action = query.data.replace("project_", "")
-        
-        if action.startswith("type_"):
-            project_type = action.replace("type_", "")
-            await self._create_project_from_template(update, context, project_type)
-            
-        elif action.startswith("manage_"):
-            project_id = action.replace("manage_", "")
-            await self._show_project_management(update, context, project_id)
-            
-        elif action == "create":
-            await self.start_project_creation(update, context)
-            
-        elif action.startswith("milestone_"):
-            project_id = action.split("_")[1]
-            milestone_action = action.split("_")[2]
-            await self._handle_milestone_action(update, context, project_id, milestone_action)
-            
-        elif action.startswith("team_"):
-            project_id = action.split("_")[1]
-            team_action = action.split("_")[2]
-            await self._handle_team_action(update, context, project_id, team_action)
-
-    async def _create_project_from_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE, project_type: str) -> None:
-        """Create a project from a template."""
-        try:
-            templates = {
-                "album": {
-                    "title": "New Album Project",
-                    "description": "Record and release a new album",
-                    "milestones": [
-                        "Song Selection",
-                        "Pre-production",
-                        "Recording",
-                        "Mixing",
-                        "Mastering",
-                        "Release Planning",
-                        "Distribution"
-                    ],
-                    "roles": [
-                        "Producer",
-                        "Engineer",
-                        "Session Musicians",
-                        "Mixing Engineer",
-                        "Mastering Engineer"
-                    ]
-                },
-                "tour": {
-                    "title": "Tour Project",
-                    "description": "Plan and execute a tour",
-                    "milestones": [
-                        "Route Planning",
-                        "Venue Booking",
-                        "Budget Planning",
-                        "Promotion",
-                        "Rehearsals",
-                        "Tour Execution",
-                        "Post-tour Analysis"
-                    ],
-                    "roles": [
-                        "Tour Manager",
-                        "Sound Engineer",
-                        "Road Crew",
-                        "Merchandise Manager",
-                        "Promoter"
-                    ]
-                },
-                "marketing": {
-                    "title": "Marketing Campaign",
-                    "description": "Promote your music",
-                    "milestones": [
-                        "Strategy Development",
-                        "Content Creation",
-                        "Social Media Planning",
-                        "Ad Campaign Setup",
-                        "Influencer Outreach",
-                        "Campaign Launch",
-                        "Performance Analysis"
-                    ],
-                    "roles": [
-                        "Marketing Manager",
-                        "Content Creator",
-                        "Social Media Manager",
-                        "PR Specialist",
-                        "Analytics Expert"
-                    ]
-                }
-            }
-            
-            if project_type not in templates:
-                # Handle custom project
-                context.user_data["creating_project"] = True
-                await update.callback_query.edit_message_text(
-                    "Please enter your project title:",
-                    reply_markup=ForceReply(selective=True)
-                )
-                return AWAITING_PROJECT_TITLE
-
-            template = templates[project_type]
-            project_id = str(uuid.uuid4())
-            
-            # Create project
-            project = Project(
-                id=project_id,
-                title=template["title"],
-                description=template["description"],
-                start_date=datetime.now(),
-                end_date=None,
-                status="planning",
-                team_members=[],
-                budget=0,
-                milestones=template["milestones"],
-                required_roles=template["roles"]
-            )
-            
-            self.bot.project_manager.projects[project_id] = project
-            
-            # Show project setup
-            keyboard = [
-                [
-                    InlineKeyboardButton("Set Budget", callback_data=f"project_budget_{project_id}"),
-                    InlineKeyboardButton("Add Team", callback_data=f"project_team_{project_id}")
-                ],
-                [
-                    InlineKeyboardButton("Edit Milestones", callback_data=f"project_milestones_{project_id}"),
-                    InlineKeyboardButton("Set Timeline", callback_data=f"project_timeline_{project_id}")
-                ],
-                [InlineKeyboardButton("Start Project", callback_data=f"project_start_{project_id}")]
-            ]
-            
-            await update.callback_query.edit_message_text(
-                f"🎵 Project Created: {template['title']}\n\n"
-                f"Description: {template['description']}\n\n"
-                "Default milestones:\n" +
-                "\n".join(f"• {m}" for m in template["milestones"]) + "\n\n"
-                "Required roles:\n" +
-                "\n".join(f"• {r}" for r in template["roles"]) + "\n\n"
-                "Please complete the project setup:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            
-        except Exception as e:
-            logger.error(f"Error creating project from template: {str(e)}")
-            await update.callback_query.edit_message_text(
-                "Sorry, there was an error creating your project. Please try again."
-            )
 
     async def handle_project_title(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle project title input."""
@@ -597,4 +532,10 @@ class ProjectHandlers(BaseHandlerMixin):
             logger.error(f"Error handling team action: {str(e)}")
             await update.callback_query.edit_message_text(
                 "Sorry, there was an error processing your request. Please try again."
-            ) 
+            )
+
+    async def _handle_error(self, update: Update) -> None:
+        """Handle general error."""
+        await update.message.reply_text(
+            "Sorry, there was an error processing your request. Please try again later."
+        ) 
