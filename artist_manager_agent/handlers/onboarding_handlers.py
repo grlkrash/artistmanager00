@@ -97,6 +97,7 @@ class OnboardingHandlers(BaseHandlerMixin):
         return [
             CommandHandler("start", self.start_onboarding),
             CommandHandler("onboard", self.start_onboarding),
+            CallbackQueryHandler(self.handle_dashboard_callback, pattern="^(newproject|social|goals|analytics|events|show_commands|start_tutorial|show_dashboard)$"),
             self.get_conversation_handler()
         ]
 
@@ -482,12 +483,16 @@ class OnboardingHandlers(BaseHandlerMixin):
         context.user_data['achievements'] = achievements
         
         await update.message.reply_text(
-            "Awesome! Now, please share your social media handles.\n"
-            "Format: platform: handle\n\n"
-            "Example:\n"
+            "Awesome! Now, let's add your social media profiles.\n\n"
+            "You can enter them in any format you like:\n"
+            "• Platform: @handle (e.g., Instagram: @artistname)\n"
+            "• @handle - platform (e.g., @artistname - Twitter)\n"
+            "• Just platform and handle (e.g., TikTok @artistname)\n"
+            "• Or any other format!\n\n"
+            "Enter each profile on a new line. For example:\n"
             "Instagram: @artistname\n"
-            "Twitter: @artistname\n"
-            "TikTok: @artistname\n\n"
+            "@artistname - Twitter\n"
+            "TikTok @artistname\n\n"
             "Or type 'skip' to skip this step.",
             reply_markup=ForceReply(selective=True)
         )
@@ -731,52 +736,226 @@ class OnboardingHandlers(BaseHandlerMixin):
                 
         return "\n".join(summary)
 
+    async def _analyze_profile_and_suggest(self, profile: ArtistProfile) -> Dict[str, Any]:
+        """Analyze profile and generate personalized suggestions."""
+        suggestions = {
+            "quick_actions": [],
+            "tutorials": [],
+            "templates": []
+        }
+        
+        # Initialize priority queue for suggestions
+        action_scores = {}
+        tutorial_scores = {}
+        template_scores = {}
+        
+        # Base suggestions by career stage
+        if profile.career_stage == "emerging":
+            action_scores.update({
+                ("Set up your first project", "Create a release plan", "/newproject"): 5,
+                ("Build your online presence", "Manage your social media", "/social"): 5,
+                ("Start tracking goals", "Set measurable targets", "/goals"): 4,
+                ("Plan your promotion", "Create marketing strategy", "/marketing"): 3,
+                ("Set up team", "Add your first team member", "/team"): 2
+            })
+            tutorial_scores.update({
+                "Project Planning Basics": 5,
+                "Social Media Strategy": 5,
+                "Goal Setting Guide": 4,
+                "Music Marketing 101": 3,
+                "Team Management Basics": 2
+            })
+            template_scores.update({
+                "First Release Plan": 5,
+                "Social Media Calendar": 5,
+                "Basic Marketing Plan": 4,
+                "Goal Tracking Sheet": 3,
+                "Team Structure Template": 2
+            })
+        elif profile.career_stage == "established":
+            action_scores.update({
+                ("Analyze your metrics", "Track your growth", "/analytics"): 5,
+                ("Manage your team", "Coordinate with collaborators", "/team"): 5,
+                ("Plan your next release", "Create a campaign", "/newproject"): 4,
+                ("Optimize promotion", "Enhance marketing strategy", "/marketing"): 4,
+                ("Schedule events", "Plan performances", "/events"): 3
+            })
+            tutorial_scores.update({
+                "Advanced Analytics": 5,
+                "Team Management": 5,
+                "Campaign Planning": 4,
+                "Marketing Strategy": 4,
+                "Event Planning": 3
+            })
+            template_scores.update({
+                "Release Campaign": 5,
+                "Team Workflow": 5,
+                "Growth Strategy": 4,
+                "Marketing Calendar": 4,
+                "Event Planning Guide": 3
+            })
+        else:  # veteran
+            action_scores.update({
+                ("Portfolio management", "Manage your catalog", "/portfolio"): 5,
+                ("Revenue tracking", "Financial overview", "/finance"): 5,
+                ("Team expansion", "Grow your team", "/team"): 4,
+                ("Brand strategy", "Enhance your brand", "/brand"): 4,
+                ("Investment planning", "Manage investments", "/invest"): 3
+            })
+            tutorial_scores.update({
+                "Portfolio Management": 5,
+                "Financial Planning": 5,
+                "Team Scaling": 4,
+                "Brand Development": 4,
+                "Investment Strategy": 3
+            })
+            template_scores.update({
+                "Business Plan": 5,
+                "Investment Strategy": 5,
+                "Team Structure": 4,
+                "Brand Guidelines": 4,
+                "Financial Forecast": 3
+            })
+            
+        # Analyze goals and adjust scores
+        for goal in profile.goals:
+            goal_lower = goal.lower()
+            
+            # Release-related goals
+            if any(word in goal_lower for word in ["release", "album", "ep", "single"]):
+                action_scores[("Plan your release", "Create a release timeline", "/newproject")] = 10
+                tutorial_scores["Release Planning"] = 10
+                template_scores["Release Timeline"] = 10
+                
+            # Streaming/listener goals
+            if any(word in goal_lower for word in ["stream", "listener", "spotify", "apple"]):
+                action_scores[("Growth tracking", "Monitor streaming metrics", "/analytics")] = 10
+                tutorial_scores["Streaming Growth"] = 10
+                template_scores["Streaming Strategy"] = 10
+                
+            # Performance goals
+            if any(word in goal_lower for word in ["tour", "perform", "show", "gig", "concert"]):
+                action_scores[("Event planning", "Schedule performances", "/events")] = 10
+                tutorial_scores["Event Planning"] = 10
+                template_scores["Tour Planning"] = 10
+                
+            # Marketing goals
+            if any(word in goal_lower for word in ["promot", "market", "advertis", "reach"]):
+                action_scores[("Marketing strategy", "Plan your promotion", "/marketing")] = 10
+                tutorial_scores["Marketing Strategy"] = 10
+                template_scores["Marketing Plan"] = 10
+                
+            # Team goals
+            if any(word in goal_lower for word in ["team", "manage", "collaborat"]):
+                action_scores[("Team management", "Build your team", "/team")] = 10
+                tutorial_scores["Team Building"] = 10
+                template_scores["Team Structure"] = 10
+                
+        # Consider social media presence
+        if not profile.social_media:
+            action_scores[("Set up social profiles", "Add your social media", "/social")] = 9
+            tutorial_scores["Social Media Setup"] = 9
+            template_scores["Social Media Plan"] = 9
+            
+        # Consider streaming presence
+        if not profile.streaming_profiles:
+            action_scores[("Set up streaming profiles", "Add your music platforms", "/streaming")] = 9
+            tutorial_scores["Music Distribution"] = 9
+            template_scores["Distribution Plan"] = 9
+            
+        # Sort by score and get top suggestions
+        suggestions["quick_actions"] = [action for action, _ in sorted(action_scores.items(), key=lambda x: x[1], reverse=True)][:5]
+        suggestions["tutorials"] = [tutorial for tutorial, _ in sorted(tutorial_scores.items(), key=lambda x: x[1], reverse=True)][:5]
+        suggestions["templates"] = [template for template, _ in sorted(template_scores.items(), key=lambda x: x[1], reverse=True)][:5]
+        
+        return suggestions
+
+    async def _show_quick_start_dashboard(self, update: Update, profile: ArtistProfile, suggestions: Dict[str, Any]) -> None:
+        """Show the personalized quick start dashboard."""
+        # Create welcome message
+        message = (
+            f"Welcome, {profile.name}! 🎵\n\n"
+            "I've analyzed your profile and prepared some personalized suggestions to help you get started.\n\n"
+            "🎯 Recommended Actions:\n"
+        )
+        
+        # Add quick actions
+        keyboard = []
+        for action, description, command in suggestions["quick_actions"][:3]:  # Show top 3
+            message += f"• {action}: {description}\n"
+            keyboard.append([InlineKeyboardButton(action, callback_data=command[1:])])  # Remove / from command
+            
+        message += "\n📚 Available Tutorials:\n"
+        for tutorial in suggestions["tutorials"][:3]:
+            message += f"• {tutorial}\n"
+            
+        message += "\n✨ Suggested Templates:\n"
+        for template in suggestions["templates"][:3]:
+            message += f"• {template}\n"
+            
+        # Add navigation buttons
+        keyboard.extend([
+            [InlineKeyboardButton("View All Commands", callback_data="show_commands")],
+            [InlineKeyboardButton("View Profile", callback_data="profile_view")],
+            [InlineKeyboardButton("Start Tutorial", callback_data="start_tutorial")]
+        ])
+        
+        await update.message.reply_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
     async def handle_profile_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle profile confirmation."""
         choice = update.message.text.lower()
         
         if choice == 'confirm profile':
-            # Create ArtistProfile object
-            profile = ArtistProfile(
-                id=str(update.effective_user.id),
-                name=context.user_data.get('name', ''),
-                genre=context.user_data.get('genre', ''),
-                career_stage=context.user_data.get('career_stage', ''),
-                goals=context.user_data.get('goals', []),
-                strengths=context.user_data.get('strengths', []),
-                areas_for_improvement=context.user_data.get('improvements', []),
-                achievements=context.user_data.get('achievements', []),
-                social_media=context.user_data.get('social_media', {}),
-                streaming_profiles=context.user_data.get('streaming_profiles', {}),
-                brand_guidelines={
-                    "description": "Default brand guidelines",
-                    "colors": [],
-                    "fonts": [],
-                    "tone": "professional"
-                },
-                created_at=datetime.now(),
-                updated_at=datetime.now()
-            )
-            
-            # Save profile
-            self.bot.profiles[str(update.effective_user.id)] = profile
-            
-            # Show success message
-            keyboard = [
-                [
-                    InlineKeyboardButton("View Profile", callback_data="profile_view"),
-                    InlineKeyboardButton("Edit Profile", callback_data="profile_edit")
-                ],
-                [InlineKeyboardButton("Start Using Bot", callback_data="show_menu")]
-            ]
-            
-            await update.message.reply_text(
-                "✨ Profile created successfully! ✨\n\n"
-                "You're all set to start using the Artist Manager Bot.\n"
-                "What would you like to do next?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            return ConversationHandler.END
+            try:
+                # Create ArtistProfile object
+                profile = ArtistProfile(
+                    id=str(update.effective_user.id),
+                    name=context.user_data.get('name', ''),
+                    genre=context.user_data.get('genre', ''),
+                    career_stage=context.user_data.get('career_stage', ''),
+                    goals=context.user_data.get('goals', []),
+                    strengths=context.user_data.get('strengths', []),
+                    areas_for_improvement=context.user_data.get('improvements', []),
+                    achievements=context.user_data.get('achievements', []),
+                    social_media=context.user_data.get('social_media', {}),
+                    streaming_profiles=context.user_data.get('streaming_profiles', {}),
+                    brand_guidelines={
+                        "description": "Default brand guidelines",
+                        "colors": [],
+                        "fonts": [],
+                        "tone": "professional"
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
+                )
+                
+                # Save profile
+                self.bot.profiles[str(update.effective_user.id)] = profile
+                
+                # Analyze profile and get suggestions
+                suggestions = await self._analyze_profile_and_suggest(profile)
+                
+                # Show success message
+                await update.message.reply_text(
+                    "✨ Profile created successfully! ✨\n\n"
+                    "I'll help you get started with managing your music career."
+                )
+                
+                # Show personalized dashboard
+                await self._show_quick_start_dashboard(update, profile, suggestions)
+                
+                return ConversationHandler.END
+                
+            except Exception as e:
+                logger.error(f"Error creating profile: {str(e)}")
+                await update.message.reply_text(
+                    "Sorry, there was an error creating your profile. Please try again."
+                )
+                return ConversationHandler.END
             
         elif choice == 'edit profile':
             sections = [
@@ -871,3 +1050,183 @@ class OnboardingHandlers(BaseHandlerMixin):
             "This step cannot be skipped. Please provide the requested information or use /cancel to stop."
         )
         return current_state 
+
+    async def _show_profile_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Show profile summary and confirmation options."""
+        # Create profile summary
+        profile_text = self._create_profile_summary(context.user_data)
+        
+        # Create confirmation keyboard
+        keyboard = [
+            ["Confirm Profile"],
+            ["Edit Profile"],
+            ["Start Over"]
+        ]
+        
+        # Show summary
+        await update.message.reply_text(
+            "Here's your profile summary:\n\n"
+            f"{profile_text}\n\n"
+            "What would you like to do?",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+        )
+        return CONFIRM_PROFILE 
+
+    async def handle_dashboard_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle callbacks from the personalized dashboard."""
+        query = update.callback_query
+        await query.answer()  # Acknowledge the button click
+        
+        try:
+            # Get user profile
+            user_id = str(update.effective_user.id)
+            profile = self.bot.profiles.get(user_id)
+            if not profile:
+                await query.message.reply_text(
+                    "Sorry, I couldn't find your profile. Please use /start to set up your profile."
+                )
+                return
+                
+            # Handle different actions
+            if query.data == "newproject":
+                # Create new project
+                await query.message.reply_text(
+                    "Let's create your first project! 🚀\n\n"
+                    "I'll guide you through setting up a new project step by step."
+                )
+                await self.bot.project_handlers.start_project_creation(query.message, context)
+                
+            elif query.data == "social":
+                # Social media management
+                social_profiles = profile.social_media
+                if not social_profiles:
+                    message = (
+                        "I notice you haven't added any social media profiles yet.\n"
+                        "Would you like to add them now?"
+                    )
+                    keyboard = [[
+                        InlineKeyboardButton("Add Profiles", callback_data="profile_edit_social"),
+                        InlineKeyboardButton("Skip for Now", callback_data="show_menu")
+                    ]]
+                else:
+                    message = "Here are your current social media profiles:\n\n"
+                    for platform, handle in social_profiles.items():
+                        message += f"• {platform.title()}: {handle}\n"
+                    message += "\nWhat would you like to do?"
+                    keyboard = [[
+                        InlineKeyboardButton("Update Profiles", callback_data="profile_edit_social"),
+                        InlineKeyboardButton("View Analytics", callback_data="social_analytics")
+                    ]]
+                
+                await query.message.edit_text(
+                    message,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                
+            elif query.data == "goals":
+                # Goal management
+                goals = profile.goals
+                if not goals:
+                    message = "Let's set up some goals for your music career!"
+                else:
+                    message = "Here are your current goals:\n\n"
+                    for goal in goals:
+                        message += f"• {goal}\n"
+                    message += "\nWould you like to update them or track progress?"
+                    
+                keyboard = [[
+                    InlineKeyboardButton("Set New Goals", callback_data="goal_create"),
+                    InlineKeyboardButton("Track Progress", callback_data="goal_progress")
+                ]]
+                await query.message.edit_text(
+                    message,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                
+            elif query.data == "analytics":
+                # Show analytics dashboard
+                await query.message.edit_text(
+                    "📊 Analytics Dashboard\n\n"
+                    "I'll help you track your growth across platforms:\n"
+                    "• Social media engagement\n"
+                    "• Streaming performance\n"
+                    "• Goal progress\n"
+                    "• Project milestones",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("View Details", callback_data="show_analytics"),
+                        InlineKeyboardButton("Back to Menu", callback_data="show_menu")
+                    ]])
+                )
+                
+            elif query.data == "events":
+                # Event planning
+                await query.message.edit_text(
+                    "🎵 Event Planning\n\n"
+                    "I can help you:\n"
+                    "• Schedule performances\n"
+                    "• Track event details\n"
+                    "• Manage bookings\n"
+                    "• Coordinate with venues",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("Schedule Event", callback_data="event_create"),
+                        InlineKeyboardButton("View Calendar", callback_data="event_calendar")
+                    ]])
+                )
+                
+            elif query.data == "show_commands":
+                # Show all available commands
+                commands = (
+                    "🎵 Available Commands:\n\n"
+                    "Core Commands:\n"
+                    "/start - Start/restart bot\n"
+                    "/help - Show this help message\n"
+                    "/menu - Show main menu\n\n"
+                    "Project Management:\n"
+                    "/newproject - Create new project\n"
+                    "/projects - View all projects\n\n"
+                    "Goal Tracking:\n"
+                    "/goals - Manage goals\n"
+                    "/progress - Track progress\n\n"
+                    "Team Management:\n"
+                    "/team - Manage team\n"
+                    "/tasks - Manage tasks\n\n"
+                    "Analytics:\n"
+                    "/analytics - View analytics\n"
+                    "/reports - Generate reports"
+                )
+                await query.message.edit_text(
+                    commands,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("Back to Dashboard", callback_data="show_dashboard")
+                    ]])
+                )
+                
+            elif query.data == "start_tutorial":
+                # Start interactive tutorial
+                await query.message.edit_text(
+                    "Welcome to the Artist Manager Tutorial! 🎓\n\n"
+                    "I'll guide you through the key features:\n"
+                    "1. Project Management\n"
+                    "2. Goal Tracking\n"
+                    "3. Team Coordination\n"
+                    "4. Analytics & Reporting\n\n"
+                    "Where would you like to start?",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Project Management", callback_data="tutorial_projects")],
+                        [InlineKeyboardButton("Goal Tracking", callback_data="tutorial_goals")],
+                        [InlineKeyboardButton("Team Coordination", callback_data="tutorial_team")],
+                        [InlineKeyboardButton("Analytics", callback_data="tutorial_analytics")],
+                        [InlineKeyboardButton("Skip Tutorial", callback_data="show_menu")]
+                    ])
+                )
+                
+            elif query.data == "show_dashboard":
+                # Show dashboard again
+                suggestions = await self._analyze_profile_and_suggest(profile)
+                await self._show_quick_start_dashboard(query.message, profile, suggestions)
+                
+        except Exception as e:
+            logger.error(f"Error handling dashboard callback: {str(e)}")
+            await query.message.reply_text(
+                "Sorry, something went wrong. Please try again or use /help to see available commands."
+            ) 
