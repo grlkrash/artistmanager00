@@ -48,10 +48,24 @@ class Dashboard:
             # Handle different button callbacks
             if query.data.startswith("goal_"):
                 await self.bot.goal_handlers.handle_goal_callback(update, context)
+            elif query.data.startswith("project_"):
+                await self.bot.project_handlers.handle_project_callback(update, context)
+            elif query.data.startswith("task_"):
+                await self.bot.task_handlers.handle_task_callback(update, context)
+            elif query.data.startswith("team_"):
+                await self.bot.team_handlers.handle_team_callback(update, context)
             elif query.data.startswith("auto_"):
-                await self.bot.handle_auto_callback(update, context)
+                await self.bot.auto_handlers.handle_auto_callback(update, context)
+            elif query.data.startswith("blockchain_"):
+                await self.bot.blockchain_handlers.handle_blockchain_callback(update, context)
+            elif query.data.startswith("music_"):
+                await self.bot.music_handlers.handle_music_callback(update, context)
             elif query.data.startswith("profile_"):
                 await self.handle_profile_callback(query)
+            elif query.data.startswith("dashboard_"):
+                await self._handle_dashboard_action(update, context, query.data)
+            elif query.data.startswith("menu_"):
+                await self._handle_menu_action(update, context, query.data)
             else:
                 logger.warning(f"Unknown callback data received: {query.data}")
                 await query.answer("This feature is not implemented yet")

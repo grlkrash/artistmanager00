@@ -31,9 +31,10 @@ def get_required_env(key: str) -> str:
 
 async def run_bot():
     """Run the bot with proper lifecycle management."""
+    bot = None
     try:
         # Get required environment variables
-        telegram_token = get_required_env("TELEGRAM_BOT_TOKEN")  # Updated to match .env
+        telegram_token = get_required_env("TELEGRAM_BOT_TOKEN")
         openai_api_key = get_required_env("OPENAI_API_KEY")
         
         # Optional environment variables with defaults
@@ -77,49 +78,36 @@ async def run_bot():
             persistence_path=persistence_path
         )
         
-        # Set up signal handlers
-        loop = asyncio.get_event_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, loop, bot)))
-        
         # Start the bot
         logger.info("Starting bot...")
         await bot.start()
         
         # Keep the bot running
         logger.info("Bot is running. Press CTRL+C to stop.")
-        await asyncio.Event().wait()  # Run forever until interrupted
+        stop_event = asyncio.Event()
+        
+        def signal_handler():
+            logger.info("Received stop signal...")
+            stop_event.set()
+            
+        # Set up signal handlers
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, signal_handler)
+            
+        # Run until stopped
+        await stop_event.wait()
         
     except Exception as e:
         logger.error(f"Error running bot: {str(e)}")
-        if 'bot' in locals():
-            await bot.stop()
-        sys.exit(1)
-
-async def shutdown(sig: signal.Signals, loop: asyncio.AbstractEventLoop, bot: ArtistManagerBot):
-    """Handle graceful shutdown."""
-    logger.info(f"Received signal {sig.name}...")
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    
-    try:
-        # Stop the bot first
+        raise
+    finally:
         if bot:
             logger.info("Stopping bot...")
-            await bot.stop()
-        
-        # Cancel other tasks
-        logger.info(f"Cancelling {len(tasks)} outstanding tasks...")
-        [task.cancel() for task in tasks]
-        await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Stop the event loop
-        logger.info("Stopping event loop...")
-        loop.stop()
-        
-    except Exception as e:
-        logger.error(f"Error during shutdown: {str(e)}")
-    finally:
-        sys.exit(0)
+            try:
+                await bot.stop()
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
 
 def main():
     """Entry point for the bot."""
@@ -128,11 +116,20 @@ def main():
         if sys.platform == "win32":
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         
-        # Run the bot
-        asyncio.run(run_bot())
+        # Create and run event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        try:
+            loop.run_until_complete(run_bot())
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user")
+        finally:
+            try:
+                loop.close()
+            except Exception as e:
+                logger.error(f"Error closing event loop: {str(e)}")
+                
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
         sys.exit(1)

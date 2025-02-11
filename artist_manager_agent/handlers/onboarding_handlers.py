@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 # State definitions
 (
-    AWAITING_NAME,
     AWAITING_MANAGER_NAME,
+    AWAITING_NAME,
     AWAITING_GENRE,
     AWAITING_SUBGENRE,
     AWAITING_STYLE_DESCRIPTION,
@@ -94,14 +94,20 @@ class OnboardingHandlers(BaseHandlerMixin):
 
     def get_handlers(self) -> List[BaseHandler]:
         """Get onboarding-related handlers."""
-        return [
-            CommandHandler("start", self.start_onboarding),
-            CommandHandler("onboard", self.start_onboarding),
-            CallbackQueryHandler(
-                self.handle_dashboard_callback,
-                pattern="^(onboard_|dashboard_menu|dashboard_back|profile_setup)"
-            )
-        ]
+        logger.info("Initializing onboarding handlers...")
+        try:
+            handlers = [
+                CallbackQueryHandler(
+                    self.handle_dashboard_callback,
+                    pattern=".*"
+                ),
+                self.get_conversation_handler()
+            ]
+            logger.info(f"Created {len(handlers)} onboarding handlers")
+            return handlers
+        except Exception as e:
+            logger.error(f"Failed to create onboarding handlers: {str(e)}")
+            raise
 
     def get_conversation_handler(self) -> ConversationHandler:
         """Get the conversation handler for onboarding."""
@@ -111,8 +117,13 @@ class OnboardingHandlers(BaseHandlerMixin):
                 CommandHandler("onboard", self.start_onboarding)
             ],
             states={
+                AWAITING_MANAGER_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_manager_name),
+                    CallbackQueryHandler(self.handle_dashboard_callback)
+                ],
                 AWAITING_NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_name)
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_name),
+                    CallbackQueryHandler(self.handle_dashboard_callback)
                 ],
                 AWAITING_GENRE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_genre)
@@ -159,10 +170,14 @@ class OnboardingHandlers(BaseHandlerMixin):
             },
             fallbacks=[
                 CommandHandler("cancel", self.cancel_onboarding),
-                CommandHandler("skip", self.skip_current_step)
+                CommandHandler("skip", self.skip_current_step),
+                CallbackQueryHandler(self.handle_dashboard_callback)
             ],
             name="onboarding",
             persistent=True,
+            per_chat=True,
+            per_user=True,
+            per_message=False,
             allow_reentry=True
         )
 
@@ -188,25 +203,51 @@ class OnboardingHandlers(BaseHandlerMixin):
         user_id = update.effective_user.id
         logger.info(f"Starting onboarding for user {user_id}")
         
-        # Clear any existing state
+        # Clear any existing state and data
         self.state_manager.clear_state(user_id)
+        context.user_data.clear()  # Clear all user data to start fresh
+        
+        # Generate manager name
+        manager_name = self._generate_manager_name()
+        context.user_data["manager_name"] = manager_name
         
         # Initialize first state
-        if await self.state_manager.transition_to(user_id, AWAITING_NAME):
-            await update.message.reply_text(
-                "🎵 Welcome to Artist Manager Bot! 🎵\n\n"
-                "Let's get started with setting up your artist profile! "
-                "First, what's your artist name?",
-                reply_markup=ForceReply(selective=True)
-            )
-            return AWAITING_NAME
-        else:
-            logger.error(f"Failed to initialize state for user {user_id}")
-            await update.message.reply_text(
-                "Sorry, I encountered an error starting the onboarding process. "
-                "Please try again with /start or /onboard."
-            )
-            return ConversationHandler.END
+        await self.state_manager.transition_to(user_id, AWAITING_MANAGER_NAME)
+        
+        # Send initial welcome - short and focused on name customization
+        welcome_text = (
+            f"👋 Hey! I'm {manager_name}, and I'll be your dedicated artist manager.\n\n"
+            "Before we dive in, would you like me to use a different name? Just type it out, or say 'keep' if you're happy with this one."
+        )
+        
+        await update.message.reply_text(
+            welcome_text,
+            reply_markup=ForceReply(selective=True)
+        )
+        return AWAITING_MANAGER_NAME
+
+    async def handle_manager_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle manager name input or confirmation."""
+        response = update.message.text.strip()
+        
+        if response.lower() != "keep":
+            context.user_data["manager_name"] = response
+        
+        # Send capabilities message after name is confirmed
+        capabilities_text = (
+            f"Great! As your manager, I'm here to help you reach your goals. We'll work together on:\n\n"
+            "🎯 Career strategy & growth\n"
+            "🎵 Release planning & execution\n"
+            "👥 Team building & coordination\n"
+            "📊 Performance tracking\n\n"
+            "Ready to get started? What name do you perform under?"
+        )
+        
+        await update.message.reply_text(
+            capabilities_text,
+            reply_markup=ForceReply(selective=True)
+        )
+        return AWAITING_NAME
 
     async def handle_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the artist name input."""
@@ -218,7 +259,7 @@ class OnboardingHandlers(BaseHandlerMixin):
             context.user_data['name'] = name
             logger.info(f"Saved name {name} for user {user_id}")
             
-            # Create keyboard for genre selection
+            # Create keyboard for genre selection with strategic context
             keyboard = [
                 ["Pop", "Rock", "Hip Hop"],
                 ["Electronic", "R&B", "Jazz"],
@@ -226,7 +267,8 @@ class OnboardingHandlers(BaseHandlerMixin):
             ]
             
             await update.message.reply_text(
-                f"Great to meet you, {name}! What genre best describes your music?",
+                f"Nice to meet you, {name}! 🎵\n\n"
+                "Let's start building your strategy. What genre best describes your music?",
                 reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
             )
             logger.info(f"Sent genre prompt to user {user_id}")
@@ -732,69 +774,81 @@ class OnboardingHandlers(BaseHandlerMixin):
         # Base suggestions by career stage
         if profile.career_stage == "emerging":
             action_scores.update({
-                ("Set up your first project", "Create a release plan", "/newproject"): 5,
-                ("Build your online presence", "Manage your social media", "/social"): 5,
-                ("Start tracking goals", "Set measurable targets", "/goals"): 4,
-                ("Plan your promotion", "Create marketing strategy", "/marketing"): 3,
-                ("Set up team", "Add your first team member", "/team"): 2
+                ("Create Release Plan", "Plan your first release", "newproject"): 10,
+                ("Set Social Strategy", "Optimize your social presence", "social"): 9,
+                ("Track Goals", "Set and monitor your goals", "goals"): 8,
+                ("Build Team", "Start building your team", "team"): 7,
+                ("Plan Marketing", "Create marketing strategy", "marketing"): 6
             })
+            
+            # Specific tutorials for emerging artists
             tutorial_scores.update({
-                "Project Planning Basics": 5,
-                "Social Media Strategy": 5,
-                "Goal Setting Guide": 4,
-                "Music Marketing 101": 3,
-                "Team Management Basics": 2
+                "Building Your Brand": 10,
+                "Social Media Growth": 9,
+                "First Release Guide": 8,
+                "Music Marketing Basics": 7,
+                "Team Building 101": 6
             })
+            
+            # Templates for emerging artists
             template_scores.update({
-                "First Release Plan": 5,
-                "Social Media Calendar": 5,
-                "Basic Marketing Plan": 4,
-                "Goal Tracking Sheet": 3,
-                "Team Structure Template": 2
+                "Release Timeline": 10,
+                "Social Media Calendar": 9,
+                "Goal Tracking Sheet": 8,
+                "Basic Marketing Plan": 7,
+                "Team Structure": 6
             })
         elif profile.career_stage == "established":
             action_scores.update({
-                ("Analyze your metrics", "Track your growth", "/analytics"): 5,
-                ("Manage your team", "Coordinate with collaborators", "/team"): 5,
-                ("Plan your next release", "Create a campaign", "/newproject"): 4,
-                ("Optimize promotion", "Enhance marketing strategy", "/marketing"): 4,
-                ("Schedule events", "Plan performances", "/events"): 3
+                ("Growth Analysis", "Track your metrics", "analytics"): 10,
+                ("Team Management", "Manage your team", "team"): 9,
+                ("Release Campaign", "Plan your next release", "newproject"): 8,
+                ("Marketing Strategy", "Optimize promotion", "marketing"): 7,
+                ("Event Planning", "Schedule performances", "events"): 6
             })
+            
+            # Advanced tutorials
             tutorial_scores.update({
-                "Advanced Analytics": 5,
-                "Team Management": 5,
-                "Campaign Planning": 4,
-                "Marketing Strategy": 4,
-                "Event Planning": 3
+                "Advanced Analytics": 10,
+                "Team Leadership": 9,
+                "Campaign Strategy": 8,
+                "Advanced Marketing": 7,
+                "Tour Planning": 6
             })
+            
+            # Professional templates
             template_scores.update({
-                "Release Campaign": 5,
-                "Team Workflow": 5,
-                "Growth Strategy": 4,
-                "Marketing Calendar": 4,
-                "Event Planning Guide": 3
+                "Campaign Strategy": 10,
+                "Team Workflow": 9,
+                "Analytics Dashboard": 8,
+                "Marketing Calendar": 7,
+                "Event Planning": 6
             })
         else:  # veteran
             action_scores.update({
-                ("Portfolio management", "Manage your catalog", "/portfolio"): 5,
-                ("Revenue tracking", "Financial overview", "/finance"): 5,
-                ("Team expansion", "Grow your team", "/team"): 4,
-                ("Brand strategy", "Enhance your brand", "/brand"): 4,
-                ("Investment planning", "Manage investments", "/invest"): 3
+                ("Portfolio Management", "Manage your catalog", "portfolio"): 10,
+                ("Revenue Analysis", "Track financials", "finance"): 9,
+                ("Team Expansion", "Scale your team", "team"): 8,
+                ("Brand Strategy", "Enhance your brand", "brand"): 7,
+                ("Investment Planning", "Manage investments", "invest"): 6
             })
+            
+            # Expert tutorials
             tutorial_scores.update({
-                "Portfolio Management": 5,
-                "Financial Planning": 5,
-                "Team Scaling": 4,
-                "Brand Development": 4,
-                "Investment Strategy": 3
+                "Portfolio Strategy": 10,
+                "Financial Planning": 9,
+                "Team Scaling": 8,
+                "Brand Development": 7,
+                "Investment Guide": 6
             })
+            
+            # Professional templates
             template_scores.update({
-                "Business Plan": 5,
-                "Investment Strategy": 5,
-                "Team Structure": 4,
-                "Brand Guidelines": 4,
-                "Financial Forecast": 3
+                "Business Plan": 10,
+                "Investment Strategy": 9,
+                "Team Structure": 8,
+                "Brand Guidelines": 7,
+                "Financial Model": 6
             })
             
         # Analyze goals and adjust scores
@@ -803,50 +857,71 @@ class OnboardingHandlers(BaseHandlerMixin):
             
             # Release-related goals
             if any(word in goal_lower for word in ["release", "album", "ep", "single"]):
-                action_scores[("Plan your release", "Create a release timeline", "/newproject")] = 10
-                tutorial_scores["Release Planning"] = 10
-                template_scores["Release Timeline"] = 10
+                action_scores[("Plan Release", "Create release timeline", "newproject")] = 15
+                tutorial_scores["Release Strategy"] = 15
+                template_scores["Release Timeline"] = 15
                 
             # Streaming/listener goals
             if any(word in goal_lower for word in ["stream", "listener", "spotify", "apple"]):
-                action_scores[("Growth tracking", "Monitor streaming metrics", "/analytics")] = 10
-                tutorial_scores["Streaming Growth"] = 10
-                template_scores["Streaming Strategy"] = 10
+                action_scores[("Track Growth", "Monitor streaming metrics", "analytics")] = 15
+                tutorial_scores["Streaming Growth"] = 15
+                template_scores["Streaming Strategy"] = 15
                 
             # Performance goals
             if any(word in goal_lower for word in ["tour", "perform", "show", "gig", "concert"]):
-                action_scores[("Event planning", "Schedule performances", "/events")] = 10
-                tutorial_scores["Event Planning"] = 10
-                template_scores["Tour Planning"] = 10
+                action_scores[("Plan Events", "Schedule performances", "events")] = 15
+                tutorial_scores["Tour Planning"] = 15
+                template_scores["Tour Strategy"] = 15
                 
             # Marketing goals
             if any(word in goal_lower for word in ["promot", "market", "advertis", "reach"]):
-                action_scores[("Marketing strategy", "Plan your promotion", "/marketing")] = 10
-                tutorial_scores["Marketing Strategy"] = 10
-                template_scores["Marketing Plan"] = 10
+                action_scores[("Marketing Plan", "Create promotion strategy", "marketing")] = 15
+                tutorial_scores["Marketing Strategy"] = 15
+                template_scores["Marketing Plan"] = 15
                 
             # Team goals
             if any(word in goal_lower for word in ["team", "manage", "collaborat"]):
-                action_scores[("Team management", "Build your team", "/team")] = 10
-                tutorial_scores["Team Building"] = 10
-                template_scores["Team Structure"] = 10
+                action_scores[("Team Building", "Grow your team", "team")] = 15
+                tutorial_scores["Team Management"] = 15
+                template_scores["Team Structure"] = 15
                 
-        # Consider social media presence
-        if not profile.social_media:
-            action_scores[("Set up social profiles", "Add your social media", "/social")] = 9
-            tutorial_scores["Social Media Setup"] = 9
-            template_scores["Social Media Plan"] = 9
+        # Consider areas for improvement
+        for area in profile.areas_for_improvement:
+            area_lower = area.lower()
             
-        # Consider streaming presence
-        if not profile.streaming_profiles:
-            action_scores[("Set up streaming profiles", "Add your music platforms", "/streaming")] = 9
-            tutorial_scores["Music Distribution"] = 9
-            template_scores["Distribution Plan"] = 9
-            
+            # Marketing improvements
+            if any(word in area_lower for word in ["market", "promot", "brand"]):
+                action_scores[("Marketing Strategy", "Improve your marketing", "marketing")] = 12
+                tutorial_scores["Marketing Masterclass"] = 12
+                
+            # Performance improvements
+            if any(word in area_lower for word in ["perform", "stage", "live"]):
+                action_scores[("Performance Planning", "Improve live shows", "events")] = 12
+                tutorial_scores["Stage Presence"] = 12
+                
+            # Production improvements
+            if any(word in area_lower for word in ["produc", "mix", "master"]):
+                action_scores[("Production Tools", "Enhance your sound", "music")] = 12
+                tutorial_scores["Production Tips"] = 12
+                
         # Sort by score and get top suggestions
-        suggestions["quick_actions"] = [action for action, _ in sorted(action_scores.items(), key=lambda x: x[1], reverse=True)][:5]
-        suggestions["tutorials"] = [tutorial for tutorial, _ in sorted(tutorial_scores.items(), key=lambda x: x[1], reverse=True)][:5]
-        suggestions["templates"] = [template for template, _ in sorted(template_scores.items(), key=lambda x: x[1], reverse=True)][:5]
+        suggestions["quick_actions"] = sorted(
+            [(title, desc, cmd) for (title, desc, cmd), score in action_scores.items()],
+            key=lambda x: action_scores[(x[0], x[1], x[2])],
+            reverse=True
+        )[:5]
+
+        suggestions["tutorials"] = sorted(
+            [(title, score) for title, score in tutorial_scores.items()],
+            key=lambda x: x[1],
+            reverse=True
+        )[:5]
+        
+        suggestions["templates"] = sorted(
+            [(title, score) for title, score in template_scores.items()],
+            key=lambda x: x[1],
+            reverse=True
+        )[:5]
         
         return suggestions
 
@@ -1079,41 +1154,33 @@ class OnboardingHandlers(BaseHandlerMixin):
         query = update.callback_query
         
         try:
-            # Enhanced logging
-            logger.info(f"Received callback: {query.data}")
-            logger.info(f"From user: {update.effective_user.id}")
-            logger.info(f"Message ID: {query.message.message_id}")
-            
-            # Acknowledge the callback first
-            await query.answer()
+            # Try to answer the callback query, but don't fail if it's expired
+            try:
+                await query.answer()
+            except Exception as e:
+                if "Query is too old" in str(e):
+                    # For expired queries, send a new message instead
+                    await query.message.reply_text(
+                        "This button has expired. Please use /start to begin a new session."
+                    )
+                    return
+                logger.warning(f"Could not answer callback query: {str(e)}")
             
             # Route to appropriate handler based on prefix
             callback_data = query.data
             logger.info(f"Routing callback: {callback_data}")
             
-            if callback_data.startswith("goal_"):
-                await self.bot.goal_handlers.handle_goal_callback(update, context)
-            elif callback_data.startswith("project_"):
-                await self.bot.project_handlers.handle_project_callback(update, context)
-            elif callback_data.startswith("task_"):
-                await self.bot.task_handlers.handle_task_callback(update, context)
-            elif callback_data.startswith("team_"):
-                await self.bot.team_handlers.handle_team_callback(update, context)
-            elif callback_data.startswith("auto_"):
-                await self.bot.auto_handlers.handle_auto_callback(update, context)
-            elif callback_data.startswith("blockchain_"):
-                await self.bot.blockchain_handlers.handle_blockchain_callback(update, context)
-            elif callback_data.startswith("music_"):
-                await self.bot.music_handlers.handle_music_callback(update, context)
-            elif callback_data.startswith(("dashboard_", "menu_", "profile_")):
-                # Handle dashboard/menu actions
-                await self._handle_dashboard_action(update, context, callback_data)
-            else:
-                logger.warning(f"Unhandled callback pattern: {callback_data}")
-                await query.message.reply_text("This feature is not implemented yet.")
+            if callback_data == "start_onboarding":
+                await self.start_onboarding(update, context)
+                return
+            
+            # Send a new message for expired buttons
+            await query.message.reply_text(
+                "Please use /start to begin a new session with fresh options."
+            )
                 
         except Exception as e:
-            logger.error(f"Error handling callback: {str(e)}", exc_info=True)
+            logger.error(f"Error handling callback: {str(e)}")
             await query.message.reply_text(
-                "Sorry, something went wrong. Please try again or use /help to see available commands."
+                "Please use /start to begin a new session."
             ) 

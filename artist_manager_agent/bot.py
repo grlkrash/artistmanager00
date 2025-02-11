@@ -11,5 +11,5 @@ from .persistence import RobustPersistence
             ApplicationBuilder()
             .token(self.token)
             .persistence(self.persistence)
-            .build()
-        )
+                .build()
+            ) 

@@ -301,7 +301,11 @@ class GoalHandlers(BaseHandlerMixin):
                 CommandHandler("cancel", self.cancel_goal_creation)
             ],
             name="goal_creation",
-            persistent=True
+            persistent=True,
+            per_message=True,
+            per_chat=False,
+            per_user=True,
+            allow_reentry=True
         )
 
     async def show_goal_analytics(self, message: Message, context: ContextTypes.DEFAULT_TYPE) -> None:

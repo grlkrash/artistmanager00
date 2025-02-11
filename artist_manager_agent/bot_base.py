@@ -193,19 +193,50 @@ class ArtistManagerBotBase:
     def _register_handlers(self):
         """Register all handlers with the registry."""
         try:
-            # Register handlers by group
-            self.handler_registry.register_handler(0, self.core_handlers)  # Core handlers
-            self.handler_registry.register_handler(1, self.goal_handlers)  # Goal handlers
-            self.handler_registry.register_handler(2, self.project_handlers)  # Project handlers
-            self.handler_registry.register_handler(3, self.blockchain_handlers)  # Blockchain handlers
-            self.handler_registry.register_handler(4, self.onboarding)  # Onboarding handlers
-            self.handler_registry.register_handler(5, self.auto_handlers)  # Auto mode handlers
-            self.handler_registry.register_handler(6, self.team_handlers)  # Team handlers
-            self.handler_registry.register_handler(7, self.music_handlers)  # Music handlers
-            self.handler_registry.register_handler(8, self.task_handlers)  # Task handlers
+            # Validate handler dependencies first
+            logger.info("Validating handler dependencies...")
+            handlers = [
+                (0, self.core_handlers, "Core handlers"),
+                (1, self.onboarding, "Onboarding handlers"),
+                (2, self.goal_handlers, "Goal handlers"),
+                (3, self.project_handlers, "Project handlers"),
+                (4, self.blockchain_handlers, "Blockchain handlers"),
+                (5, self.auto_handlers, "Auto mode handlers"),
+                (6, self.team_handlers, "Team handlers"),
+                (7, self.music_handlers, "Music handlers"),
+                (8, self.task_handlers, "Task handlers")
+            ]
             
+            # Verify all handlers exist
+            for group, handler, name in handlers:
+                if not handler:
+                    raise ValueError(f"{name} not initialized")
+                
+            # Register handlers in order
+            logger.info("Registering handlers in order...")
+            for group, handler, name in handlers:
+                try:
+                    logger.debug(f"Registering {name} (group {group})")
+                    self.handler_registry.register_handler(group, handler)
+                except Exception as e:
+                    logger.error(f"Error registering {name}: {str(e)}")
+                    raise
+                
             # Register all handlers with the application
+            logger.info("Registering handlers with application...")
             self.handler_registry.register_all(self.application)
+            
+            # Register core command handlers directly
+            logger.info("Registering core command handlers...")
+            self.application.add_handler(CommandHandler("help", self.help))
+            self.application.add_handler(CommandHandler("menu", self.show_menu))
+            
+            # Register global callback handler last
+            logger.info("Registering global callback handler...")
+            self.application.add_handler(
+                CallbackQueryHandler(self.handle_callback),
+                group=999  # Make this the last handler to process callbacks
+            )
             
             logger.info("All handlers registered successfully")
             
@@ -223,11 +254,23 @@ class ArtistManagerBotBase:
             logger.info("Initializing application...")
             await self.application.initialize()
             
-            # 3. Start application
+            # 3. Clean up only conversation states
+            logger.info("Cleaning up old conversation states...")
+            if hasattr(self.persistence, 'chat_data'):
+                for chat_id in self.persistence.chat_data:
+                    if 'conversation_state' in self.persistence.chat_data[chat_id]:
+                        del self.persistence.chat_data[chat_id]['conversation_state']
+            if hasattr(self.persistence, 'user_data'):
+                for user_id in self.persistence.user_data:
+                    if 'conversation_state' in self.persistence.user_data[user_id]:
+                        del self.persistence.user_data[user_id]['conversation_state']
+            await self.persistence._backup_data()
+            
+            # 4. Start application
             logger.info("Starting application...")
             await self.application.start()
             
-            # 4. Start polling
+            # 5. Start polling
             logger.info("Starting polling...")
             await self.application.updater.start_polling()
             
@@ -272,6 +315,12 @@ class ArtistManagerBotBase:
         query = update.callback_query
         
         try:
+            # Try to answer the callback query first to prevent timeout
+            try:
+                await query.answer()
+            except Exception as e:
+                logger.warning(f"Could not answer callback query: {str(e)}")
+            
             if query.data.startswith("goal_"):
                 await self.goal_handlers.handle_goal_callback(update, context)
             elif query.data.startswith("auto_"):
@@ -285,11 +334,13 @@ class ArtistManagerBotBase:
             elif query.data == "start_onboarding":
                 await self.onboarding.start_onboarding(update, context)
             else:
-                await query.answer("Unknown callback")
+                # Send a new message instead of answering the query
+                await query.message.reply_text("Unknown command. Please try again.")
                 
         except Exception as e:
             logger.error(f"Error handling callback: {str(e)}")
-            await query.answer("Error processing request")
+            # Send a new message instead of answering the query
+            await query.message.reply_text("Sorry, something went wrong. Please try again.")
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show help message."""
@@ -384,4 +435,28 @@ class ArtistManagerBotBase:
         await update.message.reply_text(
             "What would you like to edit?",
             reply_markup=reply_markup
-        ) 
+        )
+
+    async def handle_profile_callback(self, query: CallbackQuery) -> None:
+        """Handle profile-related callbacks."""
+        try:
+            action = query.data.replace("profile_", "")
+            
+            if action == "view":
+                await self.view_profile(query.message, query.message.bot_data)
+            elif action == "edit":
+                await self.edit_profile(query.message, query.message.bot_data)
+            elif action.startswith("edit_"):
+                section = action.replace("edit_", "")
+                await query.message.reply_text(
+                    f"To edit your {section}, use:\n"
+                    f"/update {section} <new value>\n\n"
+                    "Example:\n"
+                    f"/update {section} My new {section}"
+                )
+            else:
+                await query.message.reply_text("This feature is not implemented yet.")
+                
+        except Exception as e:
+            logger.error(f"Error in profile callback: {str(e)}")
+            await query.message.reply_text("Error processing profile action") 
