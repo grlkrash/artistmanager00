@@ -63,18 +63,18 @@ class CollaboratorProfile(BaseModelWithId):
 
 class ArtistProfile(BaseModel):
     """Model for artist profile information."""
-    id: str
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     genre: str
     career_stage: str
-    goals: List[str]
-    strengths: List[str]
-    areas_for_improvement: List[str]
-    achievements: List[str]
-    social_media: Dict[str, str]
-    streaming_profiles: Dict[str, str]
-    health_notes: List[str] = []
-    brand_guidelines: Dict[str, Any]
+    goals: List[str] = Field(default_factory=list)
+    strengths: List[str] = Field(default_factory=list)
+    areas_for_improvement: List[str] = Field(default_factory=list)
+    achievements: List[str] = Field(default_factory=list)
+    social_media: Dict[str, str] = Field(default_factory=dict)
+    streaming_profiles: Dict[str, str] = Field(default_factory=dict)
+    health_notes: List[str] = Field(default_factory=list)
+    brand_guidelines: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

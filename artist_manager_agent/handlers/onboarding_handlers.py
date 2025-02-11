@@ -11,31 +11,28 @@ import re
 import logging
 from ..models import ArtistProfile
 from .base_handler import BaseHandlerMixin
+import asyncio
+import uuid
 
 logger = logging.getLogger(__name__)
 
-# State definitions
-(
-    AWAITING_MANAGER_NAME,
-    AWAITING_NAME,
-    AWAITING_GENRE,
-    AWAITING_SUBGENRE,
-    AWAITING_STYLE_DESCRIPTION,
-    AWAITING_INFLUENCES,
-    AWAITING_CAREER_STAGE,
-    AWAITING_GOALS,
-    AWAITING_GOALS_CONFIRMATION,
-    AWAITING_STRENGTHS,
-    AWAITING_STRENGTHS_CONFIRMATION,
-    AWAITING_IMPROVEMENTS,
-    AWAITING_IMPROVEMENTS_CONFIRMATION,
-    AWAITING_ACHIEVEMENTS,
-    AWAITING_SOCIAL_MEDIA,
-    AWAITING_STREAMING_PROFILES,
-    CONFIRM_PROFILE,
-    EDIT_CHOICE,
-    EDIT_SECTION
-) = range(19)
+# Conversation states
+AWAITING_MANAGER_NAME = "AWAITING_MANAGER_NAME"
+AWAITING_NAME = "AWAITING_NAME"
+AWAITING_GENRE = "AWAITING_GENRE"
+AWAITING_SUBGENRE = "AWAITING_SUBGENRE"
+AWAITING_INFLUENCES = "AWAITING_INFLUENCES"
+AWAITING_SIMILAR_ARTISTS = "AWAITING_SIMILAR_ARTISTS"
+AWAITING_CAREER_STAGE = "AWAITING_CAREER_STAGE"
+AWAITING_GOALS = "AWAITING_GOALS"
+AWAITING_GOALS_CONFIRMATION = "AWAITING_GOALS_CONFIRMATION"
+AWAITING_STRENGTHS = "AWAITING_STRENGTHS"
+AWAITING_STRENGTHS_CONFIRMATION = "AWAITING_STRENGTHS_CONFIRMATION"
+AWAITING_IMPROVEMENTS = "AWAITING_IMPROVEMENTS"
+AWAITING_IMPROVEMENTS_CONFIRMATION = "AWAITING_IMPROVEMENTS_CONFIRMATION"
+AWAITING_ACHIEVEMENTS = "AWAITING_ACHIEVEMENTS"
+AWAITING_SOCIAL_MEDIA = "AWAITING_SOCIAL_MEDIA"
+AWAITING_STREAMING_PROFILES = "AWAITING_STREAMING_PROFILES"
 
 class StateManager:
     """Manages conversation states and transitions."""
@@ -97,10 +94,7 @@ class OnboardingHandlers(BaseHandlerMixin):
         logger.info("Initializing onboarding handlers...")
         try:
             handlers = [
-                CallbackQueryHandler(
-                    self.handle_dashboard_callback,
-                    pattern=".*"
-                ),
+                # Only return the conversation handler
                 self.get_conversation_handler()
             ]
             logger.info(f"Created {len(handlers)} onboarding handlers")
@@ -117,16 +111,20 @@ class OnboardingHandlers(BaseHandlerMixin):
                 CommandHandler("onboard", self.start_onboarding)
             ],
             states={
-                AWAITING_MANAGER_NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_manager_name),
-                    CallbackQueryHandler(self.handle_dashboard_callback)
-                ],
                 AWAITING_NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_name),
-                    CallbackQueryHandler(self.handle_dashboard_callback)
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_name)
                 ],
                 AWAITING_GENRE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_genre)
+                ],
+                AWAITING_SUBGENRE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_subgenre)
+                ],
+                AWAITING_INFLUENCES: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_influences)
+                ],
+                AWAITING_SIMILAR_ARTISTS: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_similar_artists)
                 ],
                 AWAITING_CAREER_STAGE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_career_stage)
@@ -157,27 +155,16 @@ class OnboardingHandlers(BaseHandlerMixin):
                 ],
                 AWAITING_STREAMING_PROFILES: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_streaming_profiles)
-                ],
-                CONFIRM_PROFILE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_profile_confirmation)
-                ],
-                EDIT_CHOICE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_edit_choice)
-                ],
-                EDIT_SECTION: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_edit_section)
                 ]
             },
             fallbacks=[
                 CommandHandler("cancel", self.cancel_onboarding),
-                CommandHandler("skip", self.skip_current_step),
-                CallbackQueryHandler(self.handle_dashboard_callback)
+                CommandHandler("skip", self.skip_current_step)
             ],
             name="onboarding",
             persistent=True,
             per_chat=True,
             per_user=True,
-            per_message=False,
             allow_reentry=True
         )
 
@@ -199,348 +186,449 @@ class OnboardingHandlers(BaseHandlerMixin):
         return f"{random.choice(self.first_names)} {random.choice(self.last_names)}"
 
     async def start_onboarding(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Start the onboarding process."""
-        user_id = update.effective_user.id
-        logger.info(f"Starting onboarding for user {user_id}")
-        
-        # Clear any existing state and data
-        self.state_manager.clear_state(user_id)
-        context.user_data.clear()  # Clear all user data to start fresh
-        
-        # Generate manager name
-        manager_name = self._generate_manager_name()
-        context.user_data["manager_name"] = manager_name
-        
-        # Initialize first state
-        await self.state_manager.transition_to(user_id, AWAITING_MANAGER_NAME)
-        
-        # Send initial welcome - short and focused on name customization
-        welcome_text = (
-            f"👋 Hey! I'm {manager_name}, and I'll be your dedicated artist manager.\n\n"
-            "Before we dive in, would you like me to use a different name? Just type it out, or say 'keep' if you're happy with this one."
-        )
-        
-        await update.message.reply_text(
-            welcome_text,
-            reply_markup=ForceReply(selective=True)
-        )
-        return AWAITING_MANAGER_NAME
+        """Start the onboarding process with progressive disclosure."""
+        try:
+            # Clear any existing state
+            context.user_data.clear()
+            self.state_manager.clear_state(update.effective_user.id)
+            
+            # Generate manager name
+            manager_name = self._generate_manager_name()
+            context.user_data["manager_name"] = manager_name
+            
+            # Send combined initial message with buttons
+            keyboard = [
+                [InlineKeyboardButton("Let's Get Started", callback_data="onboard_start")],
+                [InlineKeyboardButton("Change Manager Name", callback_data="onboard_change_name")]
+            ]
+            
+            await update.message.reply_text(
+                f"Hey! I'm {manager_name} 👋\n\n"
+                "I specialize in helping artists like you succeed in today's music industry. "
+                "I can help with:\n\n"
+                "🎯 Release strategy & planning\n"
+                "📈 Marketing & promotion\n"
+                "👥 Team coordination\n"
+                "📊 Performance tracking\n\n"
+                "Ready to start building your success strategy?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+            return AWAITING_MANAGER_NAME
+            
+        except Exception as e:
+            logger.error(f"Error in start_onboarding: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error starting the onboarding process. Please try again with /start"
+            )
+            return ConversationHandler.END
 
-    async def handle_manager_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle manager name input or confirmation."""
-        response = update.message.text.strip()
-        
-        if response.lower() != "keep":
-            context.user_data["manager_name"] = response
-        
-        # Send capabilities message after name is confirmed
-        capabilities_text = (
-            f"Great! As your manager, I'm here to help you reach your goals. We'll work together on:\n\n"
-            "🎯 Career strategy & growth\n"
-            "🎵 Release planning & execution\n"
-            "👥 Team building & coordination\n"
-            "📊 Performance tracking\n\n"
-            "Ready to get started? What name do you perform under?"
-        )
-        
-        await update.message.reply_text(
-            capabilities_text,
-            reply_markup=ForceReply(selective=True)
-        )
-        return AWAITING_NAME
+    async def handle_onboard_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle onboarding callbacks."""
+        query = update.callback_query
+        try:
+            await query.answer()
+            
+            if query.data == "onboard_start":
+                # Move directly to name input
+                await query.message.reply_text(
+                    "What name do you perform under?",
+                    reply_markup=ForceReply(selective=True)
+                )
+                return AWAITING_NAME
+                
+            elif query.data == "onboard_change_name":
+                await query.message.reply_text(
+                    "What name would you like me to use?",
+                    reply_markup=ForceReply(selective=True)
+                )
+                return AWAITING_MANAGER_NAME
+                
+            # Log unhandled callbacks
+            logger.warning(f"Unhandled onboard callback: {query.data}")
+            return AWAITING_MANAGER_NAME
+            
+        except Exception as e:
+            logger.error(f"Error handling onboard callback: {str(e)}")
+            await query.message.reply_text(
+                "Sorry, something went wrong. Please try /start to begin again."
+            )
+            return ConversationHandler.END
 
     async def handle_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the artist name input."""
-        user_id = update.effective_user.id
-        name = update.message.text
-        logger.info(f"Handling name input for user {user_id}: {name}")
-        
+        """Handle the artist name input with progressive disclosure."""
         try:
-            context.user_data['name'] = name
-            logger.info(f"Saved name {name} for user {user_id}")
+            name = update.message.text.strip()
+            context.user_data["name"] = name
             
-            # Create keyboard for genre selection with strategic context
+            # Acknowledge and show enthusiasm
+            await update.message.reply_text(f"Nice to meet you, {name}! 🎵")
+            await asyncio.sleep(1)
+            
+            # Lead into genre selection with context
+            await update.message.reply_text(
+                "To help me understand your music better and provide targeted advice, "
+                "let's start with your genre."
+            )
+            await asyncio.sleep(1)
+            
+            # Present genre options
             keyboard = [
                 ["Pop", "Rock", "Hip Hop"],
                 ["Electronic", "R&B", "Jazz"],
                 ["Classical", "Folk", "Other"]
             ]
-            
             await update.message.reply_text(
-                f"Nice to meet you, {name}! 🎵\n\n"
-                "Let's start building your strategy. What genre best describes your music?",
+                "Which genre best describes your music?",
                 reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
             )
-            logger.info(f"Sent genre prompt to user {user_id}")
             return AWAITING_GENRE
             
         except Exception as e:
-            logger.error(f"Error handling name for user {user_id}: {str(e)}")
+            logger.error(f"Error handling name: {str(e)}")
             await update.message.reply_text(
-                "Sorry, I encountered an error processing your name. Please try again."
+                "Sorry, I encountered an error. Could you try entering your name again?"
             )
             return AWAITING_NAME
 
     async def handle_genre(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the genre input."""
-        genre = update.message.text
-        context.user_data['genre'] = genre
-        
-        # Create keyboard for career stage
-        keyboard = [
-            ["Emerging", "Established", "Veteran"]
-        ]
-        
-        await update.message.reply_text(
-            "What's your current career stage?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-        )
-        return AWAITING_CAREER_STAGE
-
-    async def handle_career_stage(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the career stage input."""
-        stage = update.message.text.lower()
-        if stage not in ["emerging", "established", "veteran"]:
+        """Handle genre input with natural conversation flow."""
+        try:
+            genre = update.message.text.strip()
+            context.user_data["genre"] = genre
+            
+            # Acknowledge genre choice
             await update.message.reply_text(
-                "Please select one of: emerging, established, or veteran"
+                f"Ah, {genre}! That's a great space to be in right now. 🎵"
+            )
+            await asyncio.sleep(1)
+            
+            # Ask for subgenres with context
+            await update.message.reply_text(
+                f"Within {genre}, artists often have their own unique blend of styles. "
+                "What subgenres would you say your music incorporates?\n\n"
+                "You can list multiple, separated by commas.",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_SUBGENRE
+            
+        except Exception as e:
+            logger.error(f"Error handling genre: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, there was an error. Could you select your genre again?"
+            )
+            return AWAITING_GENRE
+
+    async def handle_subgenre(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle subgenre input with natural conversation flow."""
+        try:
+            subgenres = [g.strip() for g in update.message.text.split(',')]
+            context.user_data["subgenres"] = subgenres
+            
+            # Acknowledge subgenres
+            subgenre_list = ", ".join(subgenres)
+            await update.message.reply_text(
+                f"That's a great mix! {subgenre_list} gives your sound a unique edge. 🎸"
+            )
+            await asyncio.sleep(1)
+            
+            # Lead into influences
+            await update.message.reply_text(
+                "Every artist has their influences - the ones who shaped their sound and inspired their journey.\n\n"
+                "Who would you say are your main musical influences?",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_INFLUENCES
+            
+        except Exception as e:
+            logger.error(f"Error handling subgenre: {str(e)}")
+            await update.message.reply_text(
+                "Sorry, I didn't catch that. Could you list your subgenres again?"
+            )
+            return AWAITING_SUBGENRE
+
+    async def handle_influences(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle influences input with engaging conversation."""
+        try:
+            influences = [i.strip() for i in update.message.text.split(',')]
+            context.user_data["influences"] = influences
+            
+            # Acknowledge influences
+            await update.message.reply_text(
+                "Those are some solid influences! They've definitely left their mark on the industry. 🌟"
+            )
+            await asyncio.sleep(1)
+            
+            # Lead into similar artists
+            await update.message.reply_text(
+                "Now, thinking about today's music scene...\n\n"
+                "Which current artists would you say your music is similar to?",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_SIMILAR_ARTISTS
+            
+        except Exception as e:
+            logger.error(f"Error handling influences: {str(e)}")
+            await update.message.reply_text(
+                "I didn't quite get that. Could you share your influences again?"
+            )
+            return AWAITING_INFLUENCES
+
+    async def handle_similar_artists(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle similar artists input with natural progression."""
+        try:
+            similar_artists = [a.strip() for a in update.message.text.split(',')]
+            context.user_data["similar_artists"] = similar_artists
+            
+            # Acknowledge similar artists
+            await update.message.reply_text(
+                "Great comparisons! This helps me understand where you fit in today's market. 📊"
+            )
+            await asyncio.sleep(1)
+            
+            # Lead into career stage
+            await update.message.reply_text(
+                "Every artist's journey is unique, and knowing where you are helps me provide better guidance."
+            )
+            await asyncio.sleep(1)
+            
+            # Present career stage options
+            keyboard = [
+                ["Emerging Artist", "Developing Artist"],
+                ["Established Artist", "Professional Artist"]
+            ]
+            await update.message.reply_text(
+                "Where would you say you are in your career?",
+                reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
             )
             return AWAITING_CAREER_STAGE
-        
-        context.user_data['career_stage'] = stage
-        await update.message.reply_text(
-            "What are your main goals as an artist?\n\n"
-            "You can:\n"
-            "• List them one per line\n"
-            "• Separate them with commas\n"
-            "• Use bullet points\n\n"
-            "Example:\n"
-            "Release an EP by end of year\n"
-            "Reach 10k monthly listeners\n"
-            "Book 5 live shows",
-            reply_markup=ForceReply(selective=True)
-        )
-        return AWAITING_GOALS
-
-    async def handle_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the goals input."""
-        text = update.message.text.strip()
-        
-        # Split by common separators and clean up
-        goals = [
-            goal.strip()
-            for goal in re.split(r'[,;\n•\-]', text)
-            if goal.strip()
-        ]
-        
-        if not goals:
+            
+        except Exception as e:
+            logger.error(f"Error handling similar artists: {str(e)}")
             await update.message.reply_text(
-                "I couldn't detect any goals. Please share your goals as an artist.\n"
-                "You can:\n"
+                "I missed that. Could you list those similar artists again?"
+            )
+            return AWAITING_SIMILAR_ARTISTS
+
+    async def handle_career_stage(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle career stage with supportive conversation."""
+        try:
+            stage = update.message.text.strip()
+            context.user_data["career_stage"] = stage
+            
+            # Acknowledge career stage with encouragement
+            stage_responses = {
+                "emerging artist": "Every major artist started exactly where you are. The potential is exciting! 🌱",
+                "developing artist": "You've built some momentum - that's great! Time to amplify it. 🚀",
+                "established artist": "You've already achieved what many dream of. Let's take it further! ⭐",
+                "professional artist": "You've mastered your craft. Let's focus on legacy and innovation. 👑"
+            }
+            
+            await update.message.reply_text(stage_responses.get(stage.lower(), "That's great to know!"))
+            await asyncio.sleep(1)
+            
+            # Lead into goals
+            await update.message.reply_text(
+                "Now for the exciting part - your goals! 🎯\n\n"
+                "These will help me create a strategy that's perfectly aligned with your vision.\n\n"
+                "What are your main goals as an artist? You can:\n"
                 "• List them one per line\n"
-                "• Separate them with commas\n"
-                "• Use bullet points\n\n"
+                "• Separate with commas\n"
+                "• Be as specific as you like\n\n"
                 "Example:\n"
                 "Release an EP by end of year\n"
                 "Reach 10k monthly listeners\n"
-                "Book 5 live shows"
+                "Book 5 live shows",
+                reply_markup=ForceReply(selective=True)
             )
             return AWAITING_GOALS
             
-        context.user_data['temp_goals'] = goals
-        
-        # Show what was understood
-        goals_str = "\n".join(f"• {goal}" for goal in goals)
-        
-        # Create confirmation keyboard
-        keyboard = [["Yes", "No"]]
-        
-        await update.message.reply_text(
-            f"I understood these goals:\n\n{goals_str}\n\n"
-            "Is this correct?\n"
-            "If yes, let's move on to your strengths.\n"
-            "If no, please enter your goals again.",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-        )
-        return AWAITING_GOALS_CONFIRMATION
+        except Exception as e:
+            logger.error(f"Error handling career stage: {str(e)}")
+            await update.message.reply_text(
+                "I didn't catch that. Could you select your career stage again?"
+            )
+            return AWAITING_CAREER_STAGE
+
+    async def handle_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle goals input with strategic conversation."""
+        try:
+            goals = [g.strip() for g in update.message.text.split('\n') if g.strip()]
+            context.user_data["goals"] = goals
+            
+            # Format goals for display
+            goals_text = "\n".join(f"• {goal}" for goal in goals)
+            
+            # Show goals and ask for confirmation
+            await update.message.reply_text(
+                "I've noted down these goals:\n\n"
+                f"{goals_text}\n\n"
+                "These will help me create targeted strategies for your success. "
+                "Would you like to add more goals or are these good to start with?\n\n"
+                "Type 'more' to add more goals, or 'continue' to move forward.",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_GOALS_CONFIRMATION
+            
+        except Exception as e:
+            logger.error(f"Error handling goals: {str(e)}")
+            await update.message.reply_text(
+                "I didn't quite catch those goals. Could you list them again?"
+            )
+            return AWAITING_GOALS
 
     async def handle_goals_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle confirmation of goals."""
-        if update.message.text.lower() == 'yes':
-            context.user_data['goals'] = context.user_data.pop('temp_goals')
+        """Handle goals confirmation with strategic transition."""
+        response = update.message.text.lower().strip()
+        
+        if response == "more":
             await update.message.reply_text(
-                "Great! Now, what would you say are your strengths as an artist?\n"
-                "You can:\n"
-                "• List them one per line\n"
-                "• Separate them with commas\n"
-                "• Use bullet points\n\n"
-                "Example:\n"
-                "Strong vocal range\n"
-                "Experienced with live performances\n"
-                "Good at social media engagement",
-                reply_markup=ForceReply(selective=True)
-            )
-            return AWAITING_STRENGTHS
-        else:
-            await update.message.reply_text(
-                "Okay, please enter your goals again.",
+                "Sure! What additional goals would you like to add?",
                 reply_markup=ForceReply(selective=True)
             )
             return AWAITING_GOALS
-
-    async def handle_strengths(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the strengths input."""
-        text = update.message.text.strip()
-        
-        # Split by common separators and clean up
-        strengths = [
-            strength.strip()
-            for strength in re.split(r'[,;\n•\-]', text)
-            if strength.strip()
-        ]
-        
-        if not strengths:
-            await update.message.reply_text(
-                "I couldn't detect any strengths. Please share your strengths as an artist.\n"
-                "You can:\n"
-                "• List them one per line\n"
-                "• Separate them with commas\n"
-                "• Use bullet points",
-                reply_markup=ForceReply(selective=True)
-            )
-            return AWAITING_STRENGTHS
             
-        context.user_data['temp_strengths'] = strengths
-        
-        # Show what was understood
-        strengths_str = "\n".join(f"• {strength}" for strength in strengths)
-        
-        # Create confirmation keyboard
-        keyboard = [["Yes", "No"]]
-        
+        # Transition to strengths
         await update.message.reply_text(
-            f"I understood these strengths:\n\n{strengths_str}\n\n"
-            "Is this correct?\n"
-            "If yes, let's move on to areas for improvement.\n"
-            "If no, please enter your strengths again.",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-        )
-        return AWAITING_STRENGTHS_CONFIRMATION
-
-    async def handle_strengths_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle confirmation of strengths."""
-        if update.message.text.lower() == 'yes':
-            context.user_data['strengths'] = context.user_data.pop('temp_strengths')
-            await update.message.reply_text(
-                "Excellent! Now, what areas would you like to improve in?\n"
-                "You can:\n"
-                "• List them one per line\n"
-                "• Separate them with commas\n"
-                "• Use bullet points\n\n"
-                "Example:\n"
-                "Music theory knowledge\n"
-                "Stage presence\n"
-                "Marketing skills",
-                reply_markup=ForceReply(selective=True)
-            )
-            return AWAITING_IMPROVEMENTS
-        else:
-            await update.message.reply_text(
-                "Okay, please enter your strengths again.",
-                reply_markup=ForceReply(selective=True)
-            )
-            return AWAITING_STRENGTHS
-
-    async def handle_improvements(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the improvements input."""
-        text = update.message.text.strip()
-        
-        # Split by common separators and clean up
-        improvements = [
-            improvement.strip()
-            for improvement in re.split(r'[,;\n•\-]', text)
-            if improvement.strip()
-        ]
-        
-        if not improvements:
-            await update.message.reply_text(
-                "I couldn't detect any areas for improvement. Please share what you'd like to improve.\n"
-                "You can:\n"
-                "• List them one per line\n"
-                "• Separate them with commas\n"
-                "• Use bullet points",
-                reply_markup=ForceReply(selective=True)
-            )
-            return AWAITING_IMPROVEMENTS
-            
-        context.user_data['temp_improvements'] = improvements
-        
-        # Show what was understood
-        improvements_str = "\n".join(f"• {improvement}" for improvement in improvements)
-        
-        # Create confirmation keyboard
-        keyboard = [["Yes", "No"]]
-        
-        await update.message.reply_text(
-            f"I understood these areas for improvement:\n\n{improvements_str}\n\n"
-            "Is this correct?\n"
-            "If yes, let's move on to your achievements.\n"
-            "If no, please enter them again.",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-        )
-        return AWAITING_IMPROVEMENTS_CONFIRMATION
-
-    async def handle_improvements_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle confirmation of improvements."""
-        if update.message.text.lower() == 'yes':
-            context.user_data['improvements'] = context.user_data.pop('temp_improvements')
-            await update.message.reply_text(
-                "Great! Now, what are some of your notable achievements?\n"
-                "You can:\n"
-                "• List them one per line\n"
-                "• Separate them with commas\n"
-                "• Use bullet points\n\n"
-                "Example:\n"
-                "Released debut EP\n"
-                "Performed at major festival\n"
-                "Featured in music blog",
-                reply_markup=ForceReply(selective=True)
-            )
-            return AWAITING_ACHIEVEMENTS
-        else:
-            await update.message.reply_text(
-                "Okay, please enter your areas for improvement again.",
-                reply_markup=ForceReply(selective=True)
-            )
-            return AWAITING_IMPROVEMENTS
-
-    async def handle_achievements(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the achievements input."""
-        text = update.message.text.strip()
-        
-        # Split by common separators and clean up
-        achievements = [
-            achievement.strip()
-            for achievement in re.split(r'[,;\n•\-]', text)
-            if achievement.strip()
-        ]
-        
-        context.user_data['achievements'] = achievements
-        
-        await update.message.reply_text(
-            "Awesome! Now, let's add your social media profiles.\n\n"
-            "You can enter them in any format you like:\n"
-            "• Platform: @handle (e.g., Instagram: @artistname)\n"
-            "• @handle - platform (e.g., @artistname - Twitter)\n"
-            "• Just platform and handle (e.g., TikTok @artistname)\n"
-            "• Or any other format!\n\n"
-            "Enter each profile on a new line. For example:\n"
-            "Instagram: @artistname\n"
-            "@artistname - Twitter\n"
-            "TikTok @artistname\n\n"
-            "Or type 'skip' to skip this step.",
+            "Great goals! To help achieve them, let's talk about your strengths. 💪\n\n"
+            "What would you say are your biggest strengths as an artist?\n\n"
+            "This could be anything from:\n"
+            "• Technical skills (great vocalist, skilled producer)\n"
+            "• Creative aspects (songwriting, unique sound)\n"
+            "• Business skills (networking, social media)\n"
+            "• Personal qualities (work ethic, creativity)",
             reply_markup=ForceReply(selective=True)
         )
-        return AWAITING_SOCIAL_MEDIA
+        return AWAITING_STRENGTHS
+
+    async def handle_strengths(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle strengths input with positive reinforcement."""
+        try:
+            strengths = [s.strip() for s in update.message.text.split('\n') if s.strip()]
+            context.user_data["strengths"] = strengths
+            
+            # Format strengths for display
+            strengths_text = "\n".join(f"• {strength}" for strength in strengths)
+            
+            # Acknowledge strengths and ask for confirmation
+            await update.message.reply_text(
+                "Those are fantastic strengths! I've noted:\n\n"
+                f"{strengths_text}\n\n"
+                "Would you like to add any other strengths, or shall we continue?\n\n"
+                "Type 'more' to add more, or 'continue' to move forward.",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_STRENGTHS_CONFIRMATION
+            
+        except Exception as e:
+            logger.error(f"Error handling strengths: {str(e)}")
+            await update.message.reply_text(
+                "I missed that. Could you share your strengths again?"
+            )
+            return AWAITING_STRENGTHS
+
+    async def handle_strengths_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle strengths confirmation and transition to improvements."""
+        response = update.message.text.lower().strip()
+        
+        if response == "more":
+            await update.message.reply_text(
+                "Of course! What other strengths would you like to add?",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_STRENGTHS
+            
+        # Transition to improvements with context
+        await update.message.reply_text(
+            "Excellent! Now, every artist has areas they want to improve - "
+            "that's what keeps us growing and evolving. 🌱\n\n"
+            "What areas would you like to focus on developing?\n\n"
+            "This helps me identify opportunities for growth and learning.",
+            reply_markup=ForceReply(selective=True)
+        )
+        return AWAITING_IMPROVEMENTS
+
+    async def handle_improvements(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle improvements input with supportive conversation."""
+        try:
+            improvements = [i.strip() for i in update.message.text.split('\n') if i.strip()]
+            context.user_data["improvements"] = improvements
+            
+            # Format improvements for display
+            improvements_text = "\n".join(f"• {improvement}" for improvement in improvements)
+            
+            # Acknowledge improvements and ask for confirmation
+            await update.message.reply_text(
+                "These are great areas to focus on! I've noted:\n\n"
+                f"{improvements_text}\n\n"
+                "Would you like to add any other areas for improvement?\n\n"
+                "Type 'more' to add more, or 'continue' to move forward.",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_IMPROVEMENTS_CONFIRMATION
+            
+        except Exception as e:
+            logger.error(f"Error handling improvements: {str(e)}")
+            await update.message.reply_text(
+                "I didn't catch that. Could you share those areas for improvement again?"
+            )
+            return AWAITING_IMPROVEMENTS
+
+    async def handle_improvements_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle improvements confirmation and transition to achievements."""
+        response = update.message.text.lower().strip()
+        
+        if response == "more":
+            await update.message.reply_text(
+                "Sure! What other areas would you like to add?",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_IMPROVEMENTS
+            
+        # Transition to achievements with context
+        await update.message.reply_text(
+            "Perfect! Now let's celebrate your achievements! 🎉\n\n"
+            "What are some of your proudest moments or biggest achievements as an artist?\n\n"
+            "This could be anything from:\n"
+            "• Release milestones\n"
+            "• Performance highlights\n"
+            "• Streaming achievements\n"
+            "• Personal growth moments",
+            reply_markup=ForceReply(selective=True)
+        )
+        return AWAITING_ACHIEVEMENTS
+
+    async def handle_achievements(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle achievements with celebration and transition to social media."""
+        try:
+            achievements = [a.strip() for a in update.message.text.split('\n') if a.strip()]
+            context.user_data["achievements"] = achievements
+            
+            # Celebrate achievements
+            await update.message.reply_text(
+                "Those are impressive achievements! 🌟 Each one is a stepping stone to even greater success."
+            )
+            await asyncio.sleep(1)
+            
+            # Transition to social media
+            await update.message.reply_text(
+                "Now, let's talk about your online presence.\n\n"
+                "What social media platforms are you active on?\n\n"
+                "You can list them in any format:\n"
+                "• Instagram: @handle\n"
+                "• Twitter - @handle\n"
+                "• TikTok @handle\n\n"
+                "Or simply type 'skip' if you prefer not to share.",
+                reply_markup=ForceReply(selective=True)
+            )
+            return AWAITING_SOCIAL_MEDIA
+            
+        except Exception as e:
+            logger.error(f"Error handling achievements: {str(e)}")
+            await update.message.reply_text(
+                "I missed those achievements. Could you share them again?"
+            )
+            return AWAITING_ACHIEVEMENTS
 
     def _parse_social_media(self, text: str) -> Dict[str, str]:
         """Parse social media handles from various formats."""
@@ -656,61 +744,78 @@ class OnboardingHandlers(BaseHandlerMixin):
         return streaming
 
     async def handle_social_media(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle social media profile input."""
+        """Handle social media input."""
         try:
-            await update.message.reply_text(
-                "Enter your social media profiles (one per line):\n"
-                "You can use any format:\n"
-                "• Instagram: @handle\n"
-                "• @handle - Twitter\n"
-                "• TikTok @handle",
-                reply_markup=ForceReply(selective=True)
-            )
-            return AWAITING_SOCIAL_MEDIA
+            text = update.message.text.strip()
             
-        except Exception as e:
-            logger.error(f"Error handling social media input: {str(e)}")
-            return ConversationHandler.END
-
-    async def handle_streaming_profiles(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle streaming profiles input."""
-        text = update.message.text.strip()
-        
-        # If confirming social media
-        if text.lower() in ['yes', 'no']:
-            if text.lower() == 'no':
+            if text.lower() == "skip":
+                context.user_data["social_media"] = {}
+                return await self.handle_streaming_profiles(update, context)
+            
+            # Parse social media with more lenient validation
+            social_media = {}
+            entries = text.split('\n')
+            
+            for entry in entries:
+                entry = entry.strip()
+                if not entry:
+                    continue
+                    
+                # Accept various formats
+                if '@' in entry:
+                    platform, handle = entry.split('@', 1)
+                    social_media[platform.strip().lower()] = '@' + handle.strip()
+                elif ':' in entry:
+                    platform, handle = entry.split(':', 1)
+                    social_media[platform.strip().lower()] = handle.strip()
+                elif ' ' in entry:
+                    platform, handle = entry.split(' ', 1)
+                    social_media[platform.strip().lower()] = handle.strip()
+                else:
+                    continue
+            
+            if not social_media:
                 await update.message.reply_text(
-                    "Please enter your social media profiles again:",
-                    reply_markup=ForceReply(selective=True)
+                    "Please enter your social media handles in any of these formats:\n"
+                    "platform @handle\n"
+                    "platform: handle\n"
+                    "Or type 'skip' to continue."
                 )
                 return AWAITING_SOCIAL_MEDIA
             
-            # If yes, move to streaming profiles
+            context.user_data["social_media"] = social_media
+            return await self.handle_streaming_profiles(update, context)
+            
+        except Exception as e:
+            logger.error(f"Error handling social media: {str(e)}")
             await update.message.reply_text(
-                "Great! Now for your streaming platform profiles.\n"
-                "You can:\n"
-                "• Paste links directly\n"
-                "• List platform name and link\n"
-                "• Use any format (Spotify: link or Spotify - link etc)\n\n"
-                "Example:\n"
-                "spotify.com/artist/...\n"
-                "Apple Music: music.apple.com/...\n"
-                "soundcloud - soundcloud.com/...\n\n"
-                "Or type 'skip' to skip this step.",
-                reply_markup=ForceReply(selective=True)
+                "Sorry, there was an error processing your social media. Please try again or type 'skip'."
             )
-            return AWAITING_STREAMING_PROFILES
+            return AWAITING_SOCIAL_MEDIA
+
+    async def handle_streaming_profiles(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle streaming profiles with natural conversation flow."""
+        text = update.message.text.strip()
+        
+        if text.lower() == "skip":
+            # Move to profile summary with context
+            await update.message.reply_text(
+                "No problem! We can always add streaming profiles later. 👍"
+            )
+            await asyncio.sleep(1)
+            return await self._show_profile_summary(update, context)
         
         # Parse streaming profiles
         streaming = self._parse_streaming_profiles(text)
         if streaming:
             context.user_data['streaming_profiles'] = streaming
             
-            # Show what was understood
-            confirmation = "I understood these streaming profiles:\n\n"
-            for platform, url in streaming.items():
-                confirmation += f"• {platform.title()}: {url}\n"
-            confirmation += "\nIs this correct? (Yes/No)"
+            # Show what was understood with enthusiasm
+            confirmation = (
+                "Great! I've found your profiles on:\n\n"
+                + "\n".join(f"• {platform.title()}: {url}" for platform, url in streaming.items())
+                + "\n\nDoes this look correct? (Yes/No)"
+            )
             
             keyboard = [["Yes", "No"]]
             await update.message.reply_text(
@@ -719,8 +824,16 @@ class OnboardingHandlers(BaseHandlerMixin):
             )
             return AWAITING_STREAMING_PROFILES
             
-        # If skipped or no profiles entered, move to profile confirmation
-        return await self._show_profile_summary(update, context)
+        # If no profiles were parsed
+        await update.message.reply_text(
+            "I couldn't quite understand those links. Could you try again with this format?\n\n"
+            "• Spotify: spotify.com/artist/...\n"
+            "• Apple Music - music.apple.com/...\n"
+            "• SoundCloud: soundcloud.com/...\n\n"
+            "Or type 'skip' to continue without adding profiles.",
+            reply_markup=ForceReply(selective=True)
+        )
+        return AWAITING_STREAMING_PROFILES
 
     def _create_profile_summary(self, data: Dict[str, Any]) -> str:
         """Create a formatted profile summary."""
@@ -938,21 +1051,21 @@ class OnboardingHandlers(BaseHandlerMixin):
         keyboard = []
         for action, description, command in suggestions["quick_actions"][:3]:  # Show top 3
             message += f"• {action}: {description}\n"
-            keyboard.append([InlineKeyboardButton(action, callback_data=f"dashboard_{command[1:]}")])  # Remove / from command
+            keyboard.append([InlineKeyboardButton(action, callback_data=f"dashboard_action_{command}")])
             
         message += "\n📚 Available Tutorials:\n"
-        for tutorial in suggestions["tutorials"][:3]:
+        for tutorial, _ in suggestions["tutorials"][:3]:
             message += f"• {tutorial}\n"
             
         message += "\n✨ Suggested Templates:\n"
-        for template in suggestions["templates"][:3]:
+        for template, _ in suggestions["templates"][:3]:
             message += f"• {template}\n"
             
-        # Add navigation buttons
+        # Add navigation buttons with consistent patterns
         keyboard.extend([
-            [InlineKeyboardButton("View All Commands", callback_data="dashboard_show_commands")],
-            [InlineKeyboardButton("View Profile", callback_data="dashboard_profile_view")],
-            [InlineKeyboardButton("Start Tutorial", callback_data="dashboard_start_tutorial")]
+            [InlineKeyboardButton("View All Commands", callback_data="dashboard_commands")],
+            [InlineKeyboardButton("View Profile", callback_data="dashboard_profile")],
+            [InlineKeyboardButton("Start Tutorial", callback_data="dashboard_tutorial")]
         ])
         
         await update.message.reply_text(
@@ -961,106 +1074,73 @@ class OnboardingHandlers(BaseHandlerMixin):
         )
 
     async def handle_profile_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle profile confirmation."""
-        choice = update.message.text.lower()
+        """Handle profile confirmation with enthusiasm."""
+        response = update.message.text.strip()
         
-        if choice == 'confirm profile':
-            try:
-                user_id = str(update.effective_user.id)
-                logger.info(f"Creating profile for user {user_id}")
-                
-                # Check if profile already exists
-                if user_id in self.bot.profiles:
-                    logger.info(f"Profile already exists for user {user_id}")
-                    await update.message.reply_text(
-                        "You already have a profile set up. Would you like to update it instead?\n"
-                        "Use /me to view your current profile and /update to make changes."
-                    )
-                    return ConversationHandler.END
-                
-                # Create ArtistProfile object
-                profile = ArtistProfile(
-                    id=user_id,
-                    name=context.user_data.get('name', ''),
-                    genre=context.user_data.get('genre', ''),
-                    career_stage=context.user_data.get('career_stage', ''),
-                    goals=context.user_data.get('goals', []),
-                    strengths=context.user_data.get('strengths', []),
-                    areas_for_improvement=context.user_data.get('improvements', []),
-                    achievements=context.user_data.get('achievements', []),
-                    social_media=context.user_data.get('social_media', {}),
-                    streaming_profiles=context.user_data.get('streaming_profiles', {}),
-                    brand_guidelines={
-                        "description": "Default brand guidelines",
-                        "colors": [],
-                        "fonts": [],
-                        "tone": "professional"
-                    },
-                    created_at=datetime.now(),
-                    updated_at=datetime.now()
-                )
-                
-                # Save profile
-                self.bot.profiles[user_id] = profile
-                logger.info(f"Saved profile to memory for user {user_id}")
-                
-                # Save to persistence
-                if self.bot.persistence:
-                    self.bot.persistence.bot_data['profiles'] = self.bot.profiles
-                    await self.bot.persistence._backup_data()
-                    logger.info(f"Saved profile for user {user_id} to persistence")
-                    logger.info(f"Current profiles in persistence: {list(self.bot.persistence.bot_data['profiles'].keys())}")
-                else:
-                    logger.warning("No persistence available for saving profile")
-                
-                # Analyze profile and get suggestions
-                suggestions = await self._analyze_profile_and_suggest(profile)
-                
-                # Show success message
-                await update.message.reply_text(
-                    "✨ Profile created successfully! ✨\n\n"
-                    "I'll help you get started with managing your music career."
-                )
-                
-                # Show personalized dashboard
-                await self._show_quick_start_dashboard(update, profile, suggestions)
-                
-                return ConversationHandler.END
-                
-            except Exception as e:
-                logger.error(f"Error creating profile: {str(e)}")
-                await update.message.reply_text(
-                    "Sorry, there was an error creating your profile. Please try again."
-                )
-                return ConversationHandler.END
+        if response == "Perfect! Let's Begin":
+            # Create the profile
+            profile_data = {
+                "id": str(uuid.uuid4()),
+                "name": context.user_data.get("name"),
+                "genre": context.user_data.get("genre"),
+                "subgenres": context.user_data.get("subgenres", []),
+                "influences": context.user_data.get("influences", []),
+                "similar_artists": context.user_data.get("similar_artists", []),
+                "career_stage": context.user_data.get("career_stage"),
+                "goals": context.user_data.get("goals", []),
+                "strengths": context.user_data.get("strengths", []),
+                "areas_for_improvement": context.user_data.get("improvements", []),
+                "achievements": context.user_data.get("achievements", []),
+                "social_media": context.user_data.get("social_media", {}),
+                "streaming_profiles": context.user_data.get("streaming_profiles", {}),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now()
+            }
             
-        elif choice == 'edit profile':
-            sections = [
-                "Name", "Genre", "Career Stage", "Goals",
-                "Strengths", "Improvements", "Achievements",
-                "Social Media", "Streaming Profiles"
+            # Save profile
+            profile = ArtistProfile(**profile_data)
+            self.bot.profiles[str(profile.id)] = profile
+            
+            # Show success message and next steps
+            await update.message.reply_text(
+                f"🎉 Welcome aboard, {profile.name}! I'm excited to start this journey with you.\n\n"
+                "I'll be your dedicated manager, helping you:\n"
+                "• Achieve your goals\n"
+                "• Grow your career\n"
+                "• Track your progress\n"
+                "• Make strategic decisions\n\n"
+                "Ready to get started?"
+            )
+            await asyncio.sleep(1)
+            
+            # Show quick actions with proper callback patterns
+            keyboard = [
+                [InlineKeyboardButton("Set First Goal", callback_data="goal_create_new")],
+                [InlineKeyboardButton("View Dashboard", callback_data="dashboard_view")],
+                [InlineKeyboardButton("Explore Features", callback_data="dashboard_help")]
             ]
-            keyboard = [[section] for section in sections]
-            keyboard.append(["Cancel"])
             
             await update.message.reply_text(
-                "Which section would you like to edit?",
-                reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+                "What would you like to do first?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
-            return EDIT_CHOICE
             
-        elif choice == 'start over':
-            # Clear user data
-            context.user_data.clear()
-            
-            # Restart onboarding
-            return await self.start_onboarding(update, context)
+            return ConversationHandler.END
             
         else:
+            # Offer edit options
+            keyboard = [
+                ["Basic Info", "Genre & Style"],
+                ["Goals & Vision", "Strengths & Growth"],
+                ["Achievements", "Online Presence"],
+                ["Start Fresh"]
+            ]
+            
             await update.message.reply_text(
-                "Please select one of the options: Confirm Profile, Edit Profile, or Start Over"
+                "No problem! What would you like to edit?",
+                reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
             )
-            return CONFIRM_PROFILE
+            return AWAITING_EDIT_CHOICE
 
     async def handle_edit_choice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle edit section choice."""
@@ -1129,25 +1209,80 @@ class OnboardingHandlers(BaseHandlerMixin):
         return current_state 
 
     async def _show_profile_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Show profile summary and confirmation options."""
-        # Create profile summary
-        profile_text = self._create_profile_summary(context.user_data)
-        
-        # Create confirmation keyboard
-        keyboard = [
-            ["Confirm Profile"],
-            ["Edit Profile"],
-            ["Start Over"]
-        ]
-        
-        # Show summary
-        await update.message.reply_text(
-            "Here's your profile summary:\n\n"
-            f"{profile_text}\n\n"
-            "What would you like to do?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-        )
-        return CONFIRM_PROFILE 
+        """Show profile summary with engaging presentation."""
+        try:
+            # Build profile summary with personality
+            summary = "🎵 Here's what I know about you so far:\n\n"
+            
+            # Basic info with context
+            summary += f"Name: {context.user_data.get('name', 'Not specified')}\n"
+            summary += f"Genre: {context.user_data.get('genre', 'Not specified')}"
+            
+            # Add subgenres if available
+            if subgenres := context.user_data.get('subgenres'):
+                summary += f"\nSubgenres: {', '.join(subgenres)}"
+            
+            # Add influences with context
+            if influences := context.user_data.get('influences'):
+                summary += f"\n\n🎸 Influenced by:\n"
+                summary += "\n".join(f"• {influence}" for influence in influences)
+            
+            # Add similar artists
+            if similar := context.user_data.get('similar_artists'):
+                summary += f"\n\n🎤 Similar sound to:\n"
+                summary += "\n".join(f"• {artist}" for artist in similar)
+            
+            # Career stage and goals
+            summary += f"\n\n📈 Career Stage: {context.user_data.get('career_stage', 'Not specified')}\n"
+            if goals := context.user_data.get('goals'):
+                summary += "\n🎯 Goals:\n"
+                summary += "\n".join(f"• {goal}" for goal in goals)
+            
+            # Strengths and improvements
+            if strengths := context.user_data.get('strengths'):
+                summary += "\n\n💪 Strengths:\n"
+                summary += "\n".join(f"• {strength}" for strength in strengths)
+            
+            if improvements := context.user_data.get('improvements'):
+                summary += "\n\n🌱 Areas for Growth:\n"
+                summary += "\n".join(f"• {improvement}" for improvement in improvements)
+            
+            # Achievements
+            if achievements := context.user_data.get('achievements'):
+                summary += "\n\n🏆 Achievements:\n"
+                summary += "\n".join(f"• {achievement}" for achievement in achievements)
+            
+            # Online presence
+            if social := context.user_data.get('social_media'):
+                summary += "\n\n📱 Social Media:\n"
+                summary += "\n".join(f"• {platform.title()}: {handle}" for platform, handle in social.items())
+            
+            if streaming := context.user_data.get('streaming_profiles'):
+                summary += "\n\n🎧 Streaming Platforms:\n"
+                summary += "\n".join(f"• {platform.title()}: {url}" for platform, url in streaming.items())
+            
+            # Send summary with confirmation options
+            keyboard = [
+                ["Perfect! Let's Begin"],
+                ["I Need to Edit Something"]
+            ]
+            
+            await update.message.reply_text(
+                f"{summary}\n\n"
+                "How does this look? Ready to start working together?",
+                reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+            )
+            
+            return AWAITING_PROFILE_CONFIRMATION
+            
+        except Exception as e:
+            logger.error(f"Error showing profile summary: {str(e)}")
+            await update.message.reply_text(
+                "I encountered an error creating your profile summary. "
+                "Would you like to try again or start fresh?",
+                reply_markup=ReplyKeyboardMarkup([["Start Fresh"], ["Try Again"]], one_time_keyboard=True)
+            )
+            return AWAITING_PROFILE_CONFIRMATION
 
     async def handle_dashboard_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle callbacks from the personalized dashboard."""

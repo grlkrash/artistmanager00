@@ -1,6 +1,6 @@
 """Base bot class with core functionality."""
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, ClassVar
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ForceReply, Message
 from telegram.ext import (
     Application,
@@ -62,6 +62,11 @@ import json
 import shutil
 import pickle
 from pathlib import Path
+from .config import (
+    BOT_TOKEN, DB_URL, PERSISTENCE_PATH, LOG_LEVEL,
+    DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS
+)
+import threading
 
 class CoreHandlers(BaseHandlerMixin):
     """Core command handlers."""
@@ -81,52 +86,80 @@ class CoreHandlers(BaseHandlerMixin):
             CommandHandler("update", self.bot.edit_profile)
         ]
 
-class ArtistManagerBotBase:
-    """Base class for the Artist Manager Bot."""
+class ArtistManagerBot:
+    """Base class for the Artist Manager bot."""
     
-    def __init__(
-        self,
-        telegram_token: str = None,
-        artist_profile: ArtistProfile = None,
-        openai_api_key: str = None,
-        model: str = "gpt-3.5-turbo",
-        db_url: str = "sqlite:///artist_manager.db",
-        persistence_path: str = "bot_data.pickle"
-    ):
+    _instance: ClassVar[Optional['ArtistManagerBot']] = None
+    _lock = threading.Lock()
+    _initialized = False
+    
+    def __new__(cls, *args, **kwargs):
+        with cls._lock:
+            if not cls._instance:
+                cls._instance = super().__new__(cls)
+            return cls._instance
+    
+    def __init__(self, db_url=None):
         """Initialize the bot."""
-        self.token = telegram_token
-        self.default_profile = artist_profile
-        self.profiles = {}
-        self.db_url = db_url
-        self.agent = None
-        
-        # Store configuration
-        self.config = {
-            "model": model,
-            "persistence_path": persistence_path
-        }
-        
-        # Initialize components (but don't start them yet)
-        self._init_components()
-        
+        if self._initialized:
+            return
+            
+        try:
+            with self._lock:
+                if not self._initialized:
+                    self.db_url = db_url or DB_URL
+                    self.agent = None
+                    self.logger = logging.getLogger(__name__)
+                    self.logger.setLevel(LOG_LEVEL)
+                    self.application = None
+                    self.persistence = None
+                    self.handler_registry = None
+                    self.task_manager = None
+                    self.token = BOT_TOKEN
+                    self.default_profile = None
+                    self.profiles = {}
+                    self.config = {
+                        "persistence_path": PERSISTENCE_PATH,
+                        "model": DEFAULT_MODEL,
+                        "temperature": DEFAULT_TEMPERATURE,
+                        "max_tokens": DEFAULT_MAX_TOKENS
+                    }
+                    self._init_components()
+                    self._initialized = True
+        except Exception as e:
+            logger.error(f"Error initializing bot: {str(e)}")
+            raise
+    
     def _init_components(self):
         """Initialize bot components in the correct order."""
         try:
             # 1. Initialize persistence first
             logger.info("Initializing persistence...")
+            persistence_path = Path(self.config["persistence_path"])
+            persistence_path.parent.mkdir(parents=True, exist_ok=True)
+            
             self.persistence = RobustPersistence(
-                filepath=str(Path(self.config["persistence_path"]).resolve()),
-                backup_count=3
+                filepath=str(persistence_path.resolve()),
+                backup_count=3,
+                store_data=True,
+                update_interval=60
             )
             
             # 2. Initialize application builder with persistence
             logger.info("Initializing application...")
-            self.application = (
+            builder = (
                 ApplicationBuilder()
                 .token(self.token)
                 .persistence(self.persistence)
-                .build()
+                .concurrent_updates(True)
+                .connection_pool_size(8)
+                .connect_timeout(30.0)
+                .pool_timeout(30.0)
+                .read_timeout(30.0)
+                .write_timeout(30.0)
             )
+            
+            self.application = builder.build()
             
             # 3. Initialize handler registry
             logger.info("Initializing handler registry...")
@@ -247,12 +280,18 @@ class ArtistManagerBotBase:
     async def start(self):
         """Start the bot with proper initialization sequence."""
         try:
+            # Check if already running
+            if hasattr(self, '_running') and self._running:
+                logger.warning("Bot is already running")
+                return
+                
             # 1. Register handlers and load data
             await self._register_and_load()
             
             # 2. Initialize application
             logger.info("Initializing application...")
-            await self.application.initialize()
+            if not self.application._initialized:
+                await self.application.initialize()
             
             # 3. Clean up only conversation states
             logger.info("Cleaning up old conversation states...")
@@ -266,48 +305,68 @@ class ArtistManagerBotBase:
                         del self.persistence.user_data[user_id]['conversation_state']
             await self.persistence._backup_data()
             
-            # 4. Start application
+            # 4. Start application if not already started
             logger.info("Starting application...")
-            await self.application.start()
+            if not self.application.running:
+                await self.application.start()
             
-            # 5. Start polling
-            logger.info("Starting polling...")
-            await self.application.updater.start_polling()
+            # 5. Start polling with clean state
+            logger.info("Starting polling with clean state...")
+            if hasattr(self.application, 'updater') and not self.application.updater.running:
+                await self.application.updater.start_polling(
+                    drop_pending_updates=True,
+                    allowed_updates=["message", "callback_query", "inline_query"]
+                )
             
+            self._running = True
             logger.info("Bot started successfully")
             
         except Exception as e:
             logger.error(f"Error starting bot: {str(e)}")
+            # Try to clean up if possible
+            try:
+                if hasattr(self, 'application'):
+                    if hasattr(self.application, 'updater') and self.application.updater.running:
+                        await self.application.updater.stop()
+                    if self.application.running:
+                        await self.application.stop()
+                        await self.application.shutdown()
+            except Exception as cleanup_error:
+                logger.error(f"Error during cleanup: {str(cleanup_error)}")
             raise
             
     async def stop(self):
-        """Stop the bot with proper cleanup."""
+        """Stop the bot with proper cleanup sequence."""
         try:
+            if not hasattr(self, '_running') or not self._running:
+                logger.warning("Bot is not running")
+                return
+                
+            logger.info("Stopping bot...")
+            
             # 1. Stop polling first
-            logger.info("Stopping polling...")
-            await self.application.updater.stop()
+            if hasattr(self.application, 'updater') and self.application.updater.running:
+                logger.info("Stopping updater...")
+                await self.application.updater.stop()
             
-            # 2. Save persistence data
-            logger.info("Saving persistence data...")
-            await self.persistence.flush()
+            # 2. Stop application
+            if self.application.running:
+                logger.info("Stopping application...")
+                await self.application.stop()
             
-            # 3. Save task manager data
-            logger.info("Saving task manager data...")
-            await self.task_manager_integration.save_to_persistence()
-            
-            # 4. Stop application
-            logger.info("Stopping application...")
-            await self.application.stop()
-            
-            # 5. Final cleanup
+            # 3. Final cleanup
             logger.info("Performing final cleanup...")
             await self.application.shutdown()
-            self.handler_registry.clear()
+            if hasattr(self.persistence, '_backup_data'):
+                await self.persistence._backup_data()
             
+            self._running = False
             logger.info("Bot stopped successfully")
             
         except Exception as e:
             logger.error(f"Error stopping bot: {str(e)}")
+            # Set running to false even if cleanup fails
+            self._running = False
             raise
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -321,7 +380,14 @@ class ArtistManagerBotBase:
             except Exception as e:
                 logger.warning(f"Could not answer callback query: {str(e)}")
             
-            if query.data.startswith("goal_"):
+            # Log the callback for debugging
+            logger.info(f"Global callback handler received: {query.data}")
+            
+            if query.data.startswith("onboard_"):
+                # Route to onboarding handlers
+                logger.info("Routing to onboarding handlers")
+                return await self.onboarding.handle_onboard_callback(update, context)
+            elif query.data.startswith("goal_"):
                 await self.goal_handlers.handle_goal_callback(update, context)
             elif query.data.startswith("auto_"):
                 await self.auto_handlers.handle_auto_callback(update, context)
@@ -331,16 +397,22 @@ class ArtistManagerBotBase:
                 await self.blockchain_handlers.handle_blockchain_callback(update, context)
             elif query.data.startswith("music_"):
                 await self.music_handlers.handle_music_callback(update, context)
-            elif query.data == "start_onboarding":
-                await self.onboarding.start_onboarding(update, context)
+            elif query.data.startswith("dashboard_"):
+                await self.dashboard.handle_dashboard_callback(update, context)
+            elif query.data == "help":
+                await self.help(update, context)
             else:
-                # Send a new message instead of answering the query
-                await query.message.reply_text("Unknown command. Please try again.")
+                # Log unknown callback data
+                logger.warning(f"Unknown callback data: {query.data}")
+                await query.message.reply_text(
+                    "Sorry, I don't recognize that command. Please try again or use /help for available commands."
+                )
                 
         except Exception as e:
             logger.error(f"Error handling callback: {str(e)}")
-            # Send a new message instead of answering the query
-            await query.message.reply_text("Sorry, something went wrong. Please try again.")
+            await query.message.reply_text(
+                "Sorry, something went wrong. Please try again or use /help for available commands."
+            )
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show help message."""
@@ -459,4 +531,16 @@ class ArtistManagerBotBase:
                 
         except Exception as e:
             logger.error(f"Error in profile callback: {str(e)}")
-            await query.message.reply_text("Error processing profile action") 
+            await query.message.reply_text("Error processing profile action")
+
+    async def start_polling(self):
+        """Start polling with clean state."""
+        self.logger.info("Starting polling with clean state...")
+        try:
+            await self.application.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query", "inline_query"]
+            )
+        except Exception as e:
+            self.logger.error(f"Error starting polling: {e}")
+            raise 
