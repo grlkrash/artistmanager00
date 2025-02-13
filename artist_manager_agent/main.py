@@ -151,23 +151,13 @@ def main():
         data_dir = Path(DATA_DIR)
         data_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create and set main event loop
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # Set the loop for BaseBot before creating any instances
-        try:
-            BaseBot.set_main_loop(loop)
-        except RuntimeError as e:
-            logger.warning(f"Event loop already initialized: {e}")
-        
+        # Initialize bot (loop will be created/managed internally)
         bot = None
         try:
-            # Initialize the bot after loop is set
             bot = ArtistManagerBot(BOT_TOKEN, data_dir)
+            
+            # Get the loop (it's already initialized by the bot)
+            loop = asyncio.get_event_loop()
             
             # Run the bot
             loop.run_until_complete(run_bot(bot))
@@ -184,7 +174,7 @@ def main():
             try:
                 # Clean up the event loop
                 if bot:
-                    loop.run_until_complete(BaseBot.cleanup_loop())
+                    loop.run_until_complete(bot.cleanup_loop())
             except Exception as e:
                 logger.error(f"Error during final cleanup: {e}")
             finally:
