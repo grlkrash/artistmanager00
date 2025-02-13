@@ -1,8 +1,8 @@
 """Service integrations for the artist manager agent."""
 from typing import Optional, Dict, Any
 from datetime import datetime
-from .task_manager import TaskManager
-from .project_manager import ProjectManager
+from ..managers.task_manager import TaskManager
+from ..managers.project_manager import ProjectManager
 
 class ServiceManager:
     """Manage external service integrations."""

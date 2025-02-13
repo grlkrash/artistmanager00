@@ -1,11 +1,13 @@
 """Task manager integration for the Artist Manager Bot."""
+from typing import Dict, Any, List, Optional
 from datetime import datetime
-from typing import Dict, List, Optional
 import uuid
 import logging
-from .task_manager import TaskManager, Task, Goal
+from ..managers.task_manager import TaskManager
+from ..models import Task, Goal
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class TaskManagerIntegration:
     """Integration layer between the bot and task manager."""

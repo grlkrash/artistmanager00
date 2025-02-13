@@ -7,9 +7,9 @@ from telegram.ext import (
     MessageHandler, filters, CallbackQueryHandler, BaseHandler
 )
 import uuid
-from ..models import ArtistProfile
-from ..utils.logger import get_logger
-from .base_handler import BaseBotHandler
+from ...models import ArtistProfile
+from ...utils.logger import get_logger
+from ..core.base_handler import BaseBotHandler
 
 logger = get_logger(__name__)
 

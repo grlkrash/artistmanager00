@@ -22,7 +22,9 @@ from .models import (
     PerformanceMetric,
     TeamSchedule,
     Goal,
-    NetworkType
+    NetworkType,
+    StreamingStats,
+    PromotionCampaign
 )
 
 __all__ = [
@@ -48,5 +50,7 @@ __all__ = [
     "PerformanceMetric",
     "TeamSchedule",
     "Goal",
-    "NetworkType"
+    "NetworkType",
+    "StreamingStats",
+    "PromotionCampaign"
 ] 

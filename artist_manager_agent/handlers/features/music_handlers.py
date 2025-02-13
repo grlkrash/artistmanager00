@@ -7,7 +7,7 @@ from telegram.ext import (
     ContextTypes,
     BaseHandler
 )
-from .base_handler import BaseBotHandler
+from ..core.base_handler import BaseBotHandler
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)

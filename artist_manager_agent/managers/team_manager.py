@@ -2,7 +2,7 @@
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import logging
-from .models import (
+from ..models import (
     CollaboratorProfile, PaymentRequest, PerformanceMetric,
     TeamSchedule, CollaboratorRole
 )

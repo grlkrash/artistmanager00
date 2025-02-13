@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from pydantic import BaseModel
-from .models import (
+from ..models import (
     Track, Release, ReleaseType, MasteringPreset, DistributionPlatform,
     StreamingStats, PromotionCampaign
 )

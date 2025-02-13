@@ -2,7 +2,7 @@
 from typing import Dict, List, Optional
 import logging
 from datetime import datetime
-from .models import ArtistProfile
+from ..models import ArtistProfile
 
 logger = logging.getLogger(__name__)
 

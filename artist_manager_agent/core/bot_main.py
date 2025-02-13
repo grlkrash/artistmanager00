@@ -18,19 +18,23 @@ from telegram.ext import (
 )
 
 from .bot_base import BaseBot
-from .handlers.core_handlers import CoreHandlers
-from .handlers.goal_handlers import GoalHandlers
-from .handlers.task_handlers import TaskHandlers
-from .handlers.project_handlers import ProjectHandlers
-from .handlers.music_handlers import MusicHandlers
-from .handlers.blockchain_handlers import BlockchainHandlers
-from .handlers.auto_handlers import AutoHandlers
-from .handlers.team_handlers import TeamHandlers
-from .handlers.onboarding_handlers import OnboardingHandlers
-from .handlers.home_handler import HomeHandlers
-from .handlers.name_change_handler import NameChangeHandlers
+from ..handlers.core.core_handlers import CoreHandlers
+from ..handlers.features.goal_handlers import GoalHandlers
+from ..handlers.features.task_handlers import TaskHandlers
+from ..handlers.features.project_handlers import ProjectHandlers
+from ..handlers.features.music_handlers import MusicHandlers
+from ..handlers.features.blockchain_handlers import BlockchainHandlers
+from ..handlers.features.auto_handlers import AutoHandlers
+from ..handlers.features.team_handlers import TeamHandlers
+from ..handlers.features.onboarding_handlers import OnboardingHandlers
+from ..handlers.features.home_handler import HomeHandlers
+from ..handlers.features.name_change_handler import NameChangeHandlers
+from ..managers.team_manager import TeamManager
+from ..managers.dashboard import Dashboard
+from ..managers.project_manager import ProjectManager
+from ..integrations.task_manager_integration import TaskManagerIntegration
 
-from .utils.logger import get_logger
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -105,14 +109,38 @@ class ArtistManagerBot(BaseBot):
                     logger.error(f"Error initializing {attr_name} handler: {e}")
                     raise RuntimeError(f"Failed to initialize {attr_name} handler") from e
                     
+            # Initialize supporting components
+            self._init_supporting_components()
+            
             logger.info("All handlers initialized successfully")
             
         except Exception as e:
             logger.error(f"Error in _init_handlers: {e}")
             raise
 
+    def _init_supporting_components(self):
+        """Initialize supporting components."""
+        try:
+            # Initialize team manager
+            self.team_manager = TeamManager(team_id="default")
+            
+            # Initialize dashboard
+            self.dashboard = Dashboard(self)
+            
+            # Initialize project manager
+            self.project_manager = ProjectManager(self)
+            
+            # Initialize task manager integration
+            self.task_manager_integration = TaskManagerIntegration(self.persistence)
+            
+            logger.info("Supporting components initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Error initializing supporting components: {e}")
+            raise
+
     def _register_handlers(self):
-        """Register all handlers in the correct order."""
+        """Register handlers with the application."""
         try:
             # Verify all handlers are initialized
             required_handlers = [
@@ -182,6 +210,10 @@ class ArtistManagerBot(BaseBot):
                         logger.warning(f"Skipping duplicate handler {type(handler).__name__}")
                         
                 logger.info(f"Registered {len(handlers)} {description}")
+            
+            # Add error handler
+            self.application.add_error_handler(self._error_handler)
+            logger.info("Added error handler")
             
             logger.info("All handlers registered successfully")
             
@@ -367,4 +399,13 @@ class ArtistManagerBot(BaseBot):
             logger.debug("=== Debug Handler End ===")
             
         except Exception as e:
-            logger.error(f"Error in debug handler: {e}") 
+            logger.error(f"Error in debug handler: {e}")
+
+    async def _error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Error handler for handling errors."""
+        try:
+            logger.error(f"Error in handler: {context.error}")
+            await update.effective_message.reply_text("An error occurred. Please try again later.")
+        except Exception as e:
+            logger.error(f"Error in _error_handler: {e}")
+            await update.effective_message.reply_text("An error occurred. Please try again later.") 

@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import uuid
-from .models import Project, Task, CollaboratorProfile, ResourceAllocation, BudgetEntry
-from .utils.logger import get_logger
+from ..models import Project, Task, CollaboratorProfile, ResourceAllocation, BudgetEntry
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 

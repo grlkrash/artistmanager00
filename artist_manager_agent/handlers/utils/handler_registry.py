@@ -1,7 +1,9 @@
 """Handler registry for managing bot command handlers."""
 from typing import Dict, Any
 from telegram.ext import Application
-from .log import logger
+from ...utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class HandlerRegistry:
     """Registry for managing bot command handlers."""

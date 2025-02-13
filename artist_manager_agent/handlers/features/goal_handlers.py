@@ -1,13 +1,21 @@
 """Goal management handlers for the Artist Manager Bot."""
 from datetime import datetime
 import uuid
-import logging
 from typing import Dict, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from telegram.ext import ConversationHandler, ContextTypes
-from .models import Goal
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message, ForceReply
+from telegram.ext import (
+    ConversationHandler,
+    ContextTypes,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters
+)
+from ...models import Goal
+from ..core.base_handler import BaseBotHandler
+from ...utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Conversation states
 AWAITING_GOAL_TITLE = "AWAITING_GOAL_TITLE"
@@ -15,11 +23,11 @@ AWAITING_GOAL_DESCRIPTION = "AWAITING_GOAL_DESCRIPTION"
 AWAITING_GOAL_PRIORITY = "AWAITING_GOAL_PRIORITY"
 AWAITING_GOAL_DATE = "AWAITING_GOAL_DATE"
 
-class GoalHandlers:
+class GoalHandlers(BaseBotHandler):
     """Goal management handlers."""
     
     def __init__(self, bot):
-        self.bot = bot
+        super().__init__(bot)
 
     async def start_goal_creation(self, message: Message, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Start the goal creation process."""

@@ -11,13 +11,13 @@ from telegram.ext import (
     MessageHandler,
     filters
 )
-from .base_handler import BaseBotHandler
+from ..core.base_handler import BaseBotHandler
 from datetime import datetime
 import uuid
 from typing import Dict, Optional
 from telegram import Message
-from ..models import NetworkType
-from ..utils.logger import get_logger
+from ...models import NetworkType
+from ...utils.logger import get_logger
 
 logger = get_logger(__name__)
 

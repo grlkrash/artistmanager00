@@ -14,9 +14,9 @@ from telegram.ext import (
     filters,
     BaseHandler
 )
-from ..models import ArtistProfile, Task
-from .base_handler import BaseBotHandler
-from ..utils.logger import get_logger
+from ...models import ArtistProfile, Task
+from ..core.base_handler import BaseBotHandler
+from ...utils.logger import get_logger
 
 logger = get_logger(__name__)
 

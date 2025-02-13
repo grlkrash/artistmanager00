@@ -1,21 +1,29 @@
 """Task management handlers for the Artist Manager Bot."""
 from datetime import datetime
 import uuid
-import logging
 from typing import Dict, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Message
-from telegram.ext import ConversationHandler, ContextTypes
-from .models import Task
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message, ForceReply
+from telegram.ext import (
+    ConversationHandler,
+    ContextTypes,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters
+)
+from ...models import Task
+from ..core.base_handler import BaseBotHandler
+from ...utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Conversation states
 AWAITING_TASK_TITLE = "AWAITING_TASK_TITLE"
-AWAITING_TASK_PRIORITY = "AWAITING_TASK_PRIORITY"
 AWAITING_TASK_DESCRIPTION = "AWAITING_TASK_DESCRIPTION"
+AWAITING_TASK_PRIORITY = "AWAITING_TASK_PRIORITY"
 AWAITING_TASK_DUE_DATE = "AWAITING_TASK_DUE_DATE"
 
-class TaskHandlers:
+class TaskHandlers(BaseBotHandler):
     """Task management handlers."""
     
     def __init__(self, bot):

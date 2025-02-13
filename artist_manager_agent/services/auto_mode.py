@@ -5,8 +5,8 @@ from telegram.ext import ContextTypes
 import asyncio
 import json
 import random
-from .models import ArtistProfile, Task
-from .utils.logger import logger, log_error
+from ..models import ArtistProfile, Task
+from ..utils.logger import logger, log_error
 
 class AutoMode:
     """Handles auto mode functionality for the bot."""
