@@ -5,12 +5,16 @@ import asyncio
 import logging
 from pathlib import Path
 
+from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
-    PicklePersistence
+    PicklePersistence,
+    ContextTypes,
+    ConversationHandler
 )
 
 from .bot_base import BaseBot
@@ -27,68 +31,137 @@ from .handlers.home_handler import HomeHandlers
 from .handlers.name_change_handler import NameChangeHandlers
 
 from .utils.logger import get_logger
-from .utils.config import (
-    BOT_TOKEN,
-    DATA_DIR,
-    PERSISTENCE_PATH
-)
+
+logger = get_logger(__name__)
 
 class ArtistManagerBot(BaseBot):
     """Main bot class that inherits from base bot."""
     
     def __init__(self, token: str, data_dir: Path):
         """Initialize the bot."""
-        super().__init__(db_url=str(data_dir / "bot.db"))
-        
+        if not token:
+            raise ValueError("Bot token cannot be empty")
+            
+        logger.info("Initializing ArtistManagerBot...")
+        # Set token before calling super().__init__
         self.token = token
         self.data_dir = data_dir
+        logger.debug(f"Bot initialized with data directory: {data_dir}")
         
-        # Set up persistence
-        persistence = PicklePersistence(
-            filepath=str(data_dir / "bot_persistence"),
-            store_data={"user_data", "chat_data", "bot_data", "callback_data"},
-            update_interval=60
-        )
+        # Initialize base class after setting token
+        super().__init__(db_url=str(data_dir / "bot.db"))
         
-        # Initialize application
-        self.application = Application.builder() \
-            .token(token) \
-            .persistence(persistence) \
-            .arbitrary_callback_data(True) \
-            .build()
-            
         # Initialize handlers
-        self.onboarding = OnboardingHandlers(self)
-        self.core_handlers = CoreHandlers(self)
-        self.goal_handlers = GoalHandlers(self)
-        self.task_handlers = TaskHandlers(self)
-        self.project_handlers = ProjectHandlers(self)
-        self.music_handlers = MusicHandlers(self)
-        self.blockchain_handlers = BlockchainHandlers(self)
-        self.auto_handlers = AutoHandlers(self)
-        self.team_handlers = TeamHandlers(self)
-        self.home_handlers = HomeHandlers(self)
-        self.name_change_handlers = NameChangeHandlers(self)
-        
-        # Register handlers
-        self._register_handlers()
+        self._init_handlers()
         
         logger.info("Bot initialized successfully")
 
-    def _register_handlers(self):
-        # Register command handlers
-        self.application.add_handler(CommandHandler("start", self.core_handlers.start))
-        self.application.add_handler(CommandHandler("help", self.core_handlers.help))
-        
-        # Register message handlers
-        self.application.add_handler(MessageHandler(filters.TEXT, self.core_handlers.handle_message))
-        
-        # Register callback query handlers
-        self.application.add_handler(CallbackQueryHandler(self.core_handlers.handle_callback_query))
-        
-        # Register error handler
-        self.application.add_error_handler(self.core_handlers.handle_error)
+    def _init_handlers(self):
+        """Initialize all handlers."""
+        try:
+            logger.info("Initializing bot handlers...")
+            
+            # Initialize all handlers
+            self.onboarding = OnboardingHandlers(self)
+            self.core_handlers = CoreHandlers(self)
+            self.goal_handlers = GoalHandlers(self)
+            self.task_handlers = TaskHandlers(self)
+            self.project_handlers = ProjectHandlers(self)
+            self.music_handlers = MusicHandlers(self)
+            self.blockchain_handlers = BlockchainHandlers(self)
+            self.auto_handlers = AutoHandlers(self)
+            self.team_handlers = TeamHandlers(self)
+            self.home_handlers = HomeHandlers(self)
+            self.name_change_handlers = NameChangeHandlers(self)
+            
+            # Register handlers
+            self._register_handlers()
+            
+        except Exception as e:
+            logger.error(f"Error initializing handlers: {e}")
+            raise
 
+    def _register_handlers(self):
+        """Register all handlers."""
+        try:
+            # Clear any existing handlers
+            if hasattr(self.application, 'handlers'):
+                self.application.handlers.clear()
+                logger.info("Cleared existing handlers")
+            
+            # Add debug handler to log all updates
+            async def debug_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+                logger.debug("=== Debug Handler Start ===")
+                logger.debug(f"Raw update: {update.to_dict()}")
+                logger.debug(f"Update type: {type(update)}")
+                if update.effective_message:
+                    logger.debug(f"Message type: {type(update.effective_message)}")
+                    logger.debug(f"Message content: {update.effective_message.to_dict()}")
+                    if update.effective_message.text:
+                        logger.debug(f"Message text: {update.effective_message.text}")
+                        if update.effective_message.text.startswith('/'):
+                            logger.debug(f"Command detected: {update.effective_message.text}")
+                logger.debug("=== Debug Handler End ===")
+                return None
+            
+            self.application.add_handler(MessageHandler(filters.ALL, debug_handler), group=-1)
+            logger.info("Added enhanced debug handler")
+            
+            # Register handlers in priority order
+            handlers = [
+                (0, self.onboarding.get_handlers(), "Onboarding handlers"),
+                (1, self.core_handlers.get_handlers(), "Core handlers"),
+                (2, self.goal_handlers.get_handlers(), "Goal handlers"),
+                (3, self.task_handlers.get_handlers(), "Task handlers"),
+                (4, self.project_handlers.get_handlers(), "Project handlers"),
+                (5, self.music_handlers.get_handlers(), "Music handlers"),
+                (6, self.blockchain_handlers.get_handlers(), "Blockchain handlers"),
+                (7, self.auto_handlers.get_handlers(), "Auto mode handlers"),
+                (8, self.team_handlers.get_handlers(), "Team handlers"),
+                (9, self.home_handlers.get_handlers(), "Home handlers"),
+                (10, self.name_change_handlers.get_handlers(), "Name change handlers")
+            ]
+            
+            # Track registered handlers to avoid duplicates
+            registered_handlers = set()
+            
+            # Register each handler group
+            for group, handler_list, name in handlers:
+                if not handler_list:
+                    logger.warning(f"{name} not available")
+                    continue
+                    
+                for handler in handler_list:
+                    if handler is not None:
+                        # Check for duplicates
+                        handler_id = id(handler)
+                        if handler_id not in registered_handlers:
+                            logger.debug(f"Registering {name} handler {type(handler).__name__} in group {group}")
+                            if isinstance(handler, CommandHandler):
+                                logger.debug(f"Command: {handler.commands}, Callback: {handler.callback.__name__}")
+                            elif isinstance(handler, ConversationHandler):
+                                logger.debug(f"Conversation Handler: {handler.name}")
+                                logger.debug(f"Entry points: {[type(h).__name__ for h in handler.entry_points]}")
+                                logger.debug(f"States: {list(handler.states.keys())}")
+                            self.application.add_handler(handler, group=group)
+                            registered_handlers.add(handler_id)
+                            logger.info(f"Successfully registered {type(handler).__name__} in group {group}")
+                        else:
+                            logger.warning(f"Skipping duplicate handler in {name}")
+                    else:
+                        logger.warning(f"Null handler found in {name}")
+            
+            # Register error handler only if not already registered
+            if not hasattr(self.application, '_error_handlers') or not self.application._error_handlers:
+                self.application.add_error_handler(self.core_handlers.handle_error)
+                logger.info("Registered error handler")
+            
+            logger.info(f"Successfully registered {len(registered_handlers)} unique handlers")
+            
+        except Exception as e:
+            logger.error(f"Error registering handlers: {str(e)}", exc_info=True)
+            raise
+            
     async def start(self):
         """Start the bot with proper initialization."""
         try:

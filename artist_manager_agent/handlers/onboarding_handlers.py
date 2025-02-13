@@ -38,7 +38,8 @@ class OnboardingHandlers(BaseBotHandler):
 
     def get_conversation_handler(self) -> ConversationHandler:
         """Get the conversation handler for onboarding."""
-        return ConversationHandler(
+        logger.debug("Creating onboarding conversation handler")
+        handler = ConversationHandler(
             entry_points=[
                 CommandHandler("start", self.start_onboarding),
                 CallbackQueryHandler(self.handle_callback, pattern="^onboard_.*$")
@@ -63,53 +64,76 @@ class OnboardingHandlers(BaseBotHandler):
             ],
             name="onboarding",
             persistent=True,
-            per_message=True,
-            per_chat=False,
+            per_chat=True,
             per_user=True,
+            per_message=False,
             allow_reentry=True
         )
+        logger.debug(f"Onboarding handler created with entry points: {[type(h).__name__ for h in handler.entry_points]}")
+        logger.debug(f"Onboarding handler states: {list(handler.states.keys())}")
+        return handler
 
     async def start_onboarding(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Start the onboarding process."""
-        user_id = str(update.effective_user.id)
-        logger.info(f"Starting onboarding for user {user_id}")
-        
-        # Clear any existing state
-        context.user_data.clear()
-        
-        # Get or generate manager name
-        manager_name = context.bot_data.get('manager_name', 'Avery Rhodes')
-        
-        # If this is a button response, proceed directly to artist name input
-        if update.callback_query:
-            await update.callback_query.answer()
-            if update.callback_query.data == "onboard_start":
-                await self._send_or_edit_message(
-                    update,
-                    "What's your artist name?",
-                    reply_markup=None
-                )
-                return AWAITING_NAME
-            return
+            user_id = str(update.effective_user.id)
+            logger.info(f"Starting onboarding for user {user_id}")
+        logger.debug(f"Update type: {type(update)}")
+        logger.debug(f"Update content: {update.to_dict()}")
+        logger.debug(f"Context user data: {context.user_data}")
+        logger.debug(f"Context bot data: {context.bot_data}")
             
-        # Initial welcome message with button
-        keyboard = [
-            [InlineKeyboardButton("Start", callback_data="onboard_start")],
-            [InlineKeyboardButton("Settings", callback_data="settings_menu")]
-        ]
-        
-        await self._send_or_edit_message(
-            update,
-            f"👋 I'm {manager_name}\n\n"
-            "I help artists with:\n"
-            "🎯 Strategy & Planning\n"
-            "📈 Marketing\n"
-            "👥 Team Management\n"
-            "📊 Analytics",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        
-        return ConversationHandler.END
+        try:
+            # Clear any existing state
+            context.user_data.clear()
+            logger.debug("Cleared user data")
+            
+            # Get or generate manager name
+            manager_name = context.bot_data.get('manager_name', 'Avery Rhodes')
+            logger.debug(f"Using manager name: {manager_name}")
+            
+            # If this is a button response, proceed directly to artist name input
+                if update.callback_query:
+                logger.debug("Processing callback query")
+                await update.callback_query.answer()
+                if update.callback_query.data == "onboard_start":
+                    logger.info("Starting artist name input")
+                    await self._send_or_edit_message(
+                        update,
+                        "What's your artist name?",
+                        reply_markup=None
+                    )
+                    return AWAITING_NAME
+                return
+                
+            # Initial welcome message with button
+            keyboard = [
+                [InlineKeyboardButton("Start", callback_data="onboard_start")],
+                [InlineKeyboardButton("Settings", callback_data="settings_menu")]
+            ]
+            
+            logger.info("Sending welcome message")
+            await self._send_or_edit_message(
+                update,
+                f"👋 I'm {manager_name}\n\n"
+                "I help artists with:\n"
+                "🎯 Strategy & Planning\n"
+                "📈 Marketing\n"
+                "👥 Team Management\n"
+                "📊 Analytics",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            logger.debug("Welcome message sent")
+            
+            return ConversationHandler.END
+            
+        except Exception as e:
+            logger.error(f"Error in start_onboarding: {str(e)}", exc_info=True)
+            await self._send_or_edit_message(
+                update,
+                "Sorry, something went wrong. Please try /start again.",
+                reply_markup=None
+                )
+            return ConversationHandler.END
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle onboarding callbacks."""
@@ -180,23 +204,23 @@ class OnboardingHandlers(BaseBotHandler):
 
     async def handle_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle artist name input."""
-        name = update.message.text.strip()
-        context.user_data["name"] = name
-        
+            name = update.message.text.strip()
+            context.user_data["name"] = name
+            
         await self._send_or_edit_message(
             update,
             "What genre best describes your music?\n\n"
             "Examples: Pop, Rock, Hip Hop, Electronic, etc.",
             reply_markup=None
-        )
-        return AWAITING_GENRE
-
+            )
+            return AWAITING_GENRE
+            
     async def handle_genre(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle genre input."""
-        genre = update.message.text.strip()
-        context.user_data["genre"] = genre
-        
-        keyboard = [
+            genre = update.message.text.strip()
+            context.user_data["genre"] = genre
+            
+            keyboard = [
             ["Emerging", "Developing"],
             ["Established", "Professional"]
         ]
@@ -206,14 +230,14 @@ class OnboardingHandlers(BaseBotHandler):
             update,
             "What's your current career stage?",
             reply_markup=reply_markup
-        )
-        return AWAITING_CAREER_STAGE
-
+            )
+            return AWAITING_CAREER_STAGE
+            
     async def handle_career_stage(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle career stage input."""
-        stage = update.message.text.strip()
-        context.user_data["career_stage"] = stage
-        
+            stage = update.message.text.strip()
+            context.user_data["career_stage"] = stage
+            
         # Create profile
         profile = ArtistProfile(
             id=str(uuid.uuid4()),
@@ -320,8 +344,8 @@ class OnboardingHandlers(BaseBotHandler):
             await self._send_or_edit_message(
                 update,
                 "Sorry, I couldn't process that. Please try again or type 'c' to continue."
-            )
-            return AWAITING_STREAMING_PROFILES
+        )
+        return AWAITING_STREAMING_PROFILES
 
     def _parse_profile_link(self, text: str, platform: str) -> Optional[str]:
         """Parse a streaming profile link for a specific platform."""

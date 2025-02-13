@@ -13,8 +13,8 @@ class BaseBotHandler(ABC):
     def __init__(self, bot):
         """Initialize the handler."""
         self.bot = bot
-        self.group = 0  # Default group, should be overridden
-        logger.info(f"Initializing {self.__class__.__name__} with group {self.group}")
+        # Remove default group initialization - each handler must specify its own
+        logger.info(f"Initializing {self.__class__.__name__}")
 
     @abstractmethod
     def get_handlers(self) -> List[BaseHandler]:

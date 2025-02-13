@@ -11,7 +11,8 @@ from telegram.ext import (
     filters,
     ConversationHandler,
     CallbackQueryHandler,
-    BaseHandler
+    BaseHandler,
+    PicklePersistence
 )
 from .agent import ArtistManagerAgent
 from .models import (
@@ -55,6 +56,15 @@ from .handlers.core_handlers import CoreHandlers
 from .handlers.onboarding_handlers import OnboardingHandlers
 from .handlers.home_handler import HomeHandlers
 from .handlers.name_change_handler import NameChangeHandlers
+from .utils.config import (
+    BOT_TOKEN,
+    DB_URL,
+    PERSISTENCE_PATH,
+    LOG_LEVEL,
+    DEFAULT_MODEL,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_MAX_TOKENS
+)
 import uuid
 import logging
 import asyncio
@@ -66,86 +76,52 @@ import json
 import shutil
 import pickle
 from pathlib import Path
-from .config import (
-    BOT_TOKEN, DB_URL, PERSISTENCE_PATH, LOG_LEVEL,
-    DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS
-)
 import threading
-
-class CoreHandlers(BaseBotHandler):
-    """Core command handlers."""
-    
-    group = 0  # Core handler group for registration
-    
-    def __init__(self, bot):
-        """Initialize core handlers."""
-        self.bot = bot
-        
-    def get_handlers(self) -> List[BaseHandler]:
-        """Get core command handlers."""
-        return [
-            CommandHandler("help", self.bot.help),
-            CommandHandler("home", self.bot.show_menu),
-            CommandHandler("me", self.bot.view_profile),
-            CommandHandler("update", self.bot.edit_profile)
-        ]
 
 class BaseBot:
     """Base class for the Artist Manager bot."""
     
     _instance: ClassVar[Optional['BaseBot']] = None
     _lock = threading.Lock()
-    _initialized = False
     
     def __new__(cls, *args, **kwargs):
         with cls._lock:
             if not cls._instance:
                 cls._instance = super().__new__(cls)
+                cls._instance._initialized = False
             return cls._instance
     
     def __init__(self, db_url=None):
         """Initialize the bot."""
-        self._initialized = False
-        self.profiles = {}
-        self.db_url = db_url
-        
-        # Initialize handlers as None
-        self.onboarding = None
-        self.core_handlers = None
-        self.goal_handlers = None
-        self.task_handlers = None
-        self.project_handlers = None
-        self.music_handlers = None
-        self.blockchain_handlers = None
-        self.auto_handlers = None
-        self.team_handlers = None
-        self.home_handlers = None
-        self.name_change_handlers = None
-        
-        try:
-            with self._lock:
-                if not self._initialized:
-                    self.db_url = db_url or DB_URL
-                    self.agent = None
-                    self.logger = logging.getLogger(__name__)
-                    self.logger.setLevel(LOG_LEVEL)
-                    self.application = None
-                    self.persistence = None
-                    self.handler_registry = None
-                    self.task_manager = None
-                    self.token = BOT_TOKEN
-                    self.default_profile = None
-                    self.config = {
-                        "persistence_path": PERSISTENCE_PATH,
-                        "model": DEFAULT_MODEL,
-                        "temperature": DEFAULT_TEMPERATURE,
-                        "max_tokens": DEFAULT_MAX_TOKENS
-                    }
-                    self._init_components()
-                    self._initialized = True
-        except Exception as e:
-            logger.error(f"Error initializing bot: {str(e)}")
-            raise
+        with self._lock:
+            if self._initialized:
+                return
+                
+            try:
+                self.db_url = db_url or DB_URL
+                self.agent = None
+                self.logger = logging.getLogger(__name__)
+                self.logger.setLevel(LOG_LEVEL)
+                self.application = None
+                self.persistence = None
+                self.handler_registry = None
+                self.task_manager = None
+                self.token = None  # Will be set by child class
+                self.default_profile = None
+                self.config = {
+                    "persistence_path": PERSISTENCE_PATH,
+                    "model": DEFAULT_MODEL,
+                    "temperature": DEFAULT_TEMPERATURE,
+                    "max_tokens": DEFAULT_MAX_TOKENS
+                }
+                
+                # Initialize components
+                self._init_components()
+                self._initialized = True
+                
+            except Exception as e:
+                logger.error(f"Error initializing bot: {str(e)}")
+                raise
     
     def _init_components(self):
         """Initialize bot components in the correct order."""
@@ -155,117 +131,105 @@ class BaseBot:
             persistence_path = Path(self.config["persistence_path"])
             persistence_path.parent.mkdir(parents=True, exist_ok=True)
             
+            store_data = {
+                "user_data": True,
+                "chat_data": True,
+                "bot_data": True,
+                "callback_data": True
+            }
+            
             self.persistence = RobustPersistence(
                 filepath=str(persistence_path.resolve()),
-                backup_count=5,  # Increased from 3
-                store_data=True,
-                update_interval=30,  # Decreased from 60
-                store_callback_data=True,
-                store_user_data=True,
-                store_chat_data=True,
-                store_bot_data=True
+                store_data=store_data,
+                update_interval=30,
+                backup_count=5
             )
             
             # 2. Load existing state before initializing components
-            if hasattr(self.persistence, 'get_bot_data'):
-                self.bot_data = self.persistence.get_bot_data()
-            else:
-                self.bot_data = {}
+            self.bot_data = {}  # Initialize empty first
             
             # 3. Initialize application with persistence
             logger.info("Initializing application...")
-            builder = (
-                ApplicationBuilder()
-                .token(self.token)
-                .persistence(self.persistence)
-                .concurrent_updates(True)
-                .connection_pool_size(8)
-                .connect_timeout(30.0)
-                .pool_timeout(30.0)
-                .read_timeout(30.0)
-                .write_timeout(30.0)
-                .arbitrary_callback_data(True)  # Enable arbitrary callback data
-            )
-            
+            builder = Application.builder()
+            builder.token(self.token or BOT_TOKEN)
+            builder.persistence(self.persistence)
+            builder.concurrent_updates(True)
             self.application = builder.build()
             
             # 4. Initialize handler registry
             logger.info("Initializing handler registry...")
             self.handler_registry = HandlerRegistry()
             
-            # 5. Initialize all handlers in correct order
-            logger.info("Initializing bot handlers...")
-            self.onboarding = OnboardingHandlers(self)
-            self.core_handlers = CoreHandlers(self)
-            self.goal_handlers = GoalHandlers(self)
-            self.task_handlers = TaskHandlers(self)
-            self.project_handlers = ProjectHandlers(self)
-            self.music_handlers = MusicHandlers(self)
-            self.blockchain_handlers = BlockchainHandlers(self)
-            self.auto_handlers = AutoHandlers(self)
-            self.team_handlers = TeamHandlers(self)
-            self.home_handlers = HomeHandlers(self)
-            self.name_change_handlers = NameChangeHandlers(self)
-            
-            # 6. Initialize supporting components
+            # 5. Initialize supporting components
             logger.info("Initializing supporting components...")
-            self.team_manager = TeamManager(team_id="default")
-            self.dashboard = Dashboard(self)
-            self.project_manager = ProjectManager(self)
-            self.task_manager_integration = TaskManagerIntegration(self.persistence)
+            self._init_supporting_components()
             
-            # 7. Register all handlers
-            logger.info("Registering handlers...")
-            self._register_handlers()
-            
-            logger.info("All components initialized successfully")
+            logger.info("Core components initialized successfully")
             
         except Exception as e:
             logger.error(f"Error initializing components: {str(e)}")
             raise
-            
-    def _register_handlers(self):
-        """Register all handlers with the registry."""
+
+    def _init_supporting_components(self):
+        """Initialize supporting components."""
+        self.team_manager = TeamManager(team_id="default")
+        self.dashboard = Dashboard(self)
+        self.project_manager = ProjectManager(self)
+        self.task_manager_integration = TaskManagerIntegration(self.persistence)
+
+    async def _cleanup(self):
+        """Clean up resources."""
         try:
-            # Clear any existing handlers
-            if hasattr(self.application, 'handlers'):
-                self.application.handlers.clear()
-                logger.info("Cleared existing handlers")
-            
-            # Register handlers in priority order
-            handlers = [
-                (0, self.onboarding.get_handlers(), "Onboarding handlers"),
-                (1, self.core_handlers.get_handlers(), "Core handlers"),
-                (2, self.goal_handlers.get_handlers(), "Goal handlers"),
-                (3, self.task_handlers.get_handlers(), "Task handlers"),
-                (4, self.project_handlers.get_handlers(), "Project handlers"),
-                (5, self.music_handlers.get_handlers(), "Music handlers"),
-                (6, self.blockchain_handlers.get_handlers(), "Blockchain handlers"),
-                (7, self.auto_handlers.get_handlers(), "Auto mode handlers"),
-                (8, self.team_handlers.get_handlers(), "Team handlers"),
-                (9, self.home_handlers.get_handlers(), "Home handlers"),
-                (10, self.name_change_handlers.get_handlers(), "Name change handlers")
-            ]
-            
-            # Register each handler group
-            for group, handler_list, name in handlers:
-                if not handler_list:
-                    logger.warning(f"{name} not available")
-                    continue
-                    
-                for handler in handler_list:
-                    if handler is not None:
-                        logger.info(f"Registering {name} in group {group}")
-                        self.application.add_handler(handler, group=group)
-                    else:
-                        logger.warning(f"Null handler found in {name}")
-            
-            # Register error handler last
-            self.application.add_error_handler(self._error_handler)
-            logger.info("All handlers registered successfully")
-            
+            if hasattr(self, 'application'):
+                # Stop all running tasks
+                tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+                for task in tasks:
+                    task.cancel()
+                
+                # Wait for tasks to complete
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Stop application
+                await self.application.stop()
+                await self.application.shutdown()
+                
+            if hasattr(self, 'persistence'):
+                await self.persistence.close()
+                
         except Exception as e:
-            logger.error(f"Error registering handlers: {str(e)}")
+            logger.error(f"Error during cleanup: {str(e)}")
+            raise
+
+    def __del__(self):
+        """Ensure cleanup on deletion."""
+        if hasattr(self, '_event_loop') and self._event_loop and not self._event_loop.is_closed():
+            try:
+                self._event_loop.run_until_complete(self._cleanup())
+            except Exception as e:
+                logger.error(f"Error during cleanup in __del__: {str(e)}")
+
+    def _register_handlers(self):
+        """Register handlers with the application."""
+        # This is now a hook for child classes to implement
+        pass
+
+    async def start(self):
+        """Start the bot."""
+        try:
+            await self.application.initialize()
+            await self.application.start()
+            await self.application.updater.start_polling()
+        except Exception as e:
+            logger.error(f"Error starting bot: {e}")
+            raise
+
+    async def stop(self):
+        """Stop the bot."""
+        try:
+            await self._cleanup()
+        except Exception as e:
+            logger.error(f"Error stopping bot: {e}")
             raise
 
     async def _error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

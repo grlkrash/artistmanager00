@@ -56,6 +56,7 @@ class BlockchainHandlers(BaseBotHandler):
     """Handlers for blockchain-related functionality."""
     
     def __init__(self, bot):
+        """Initialize blockchain handlers."""
         super().__init__(bot)
         self.group = 6  # Set handler group
 
@@ -63,41 +64,33 @@ class BlockchainHandlers(BaseBotHandler):
         """Get blockchain-related handlers."""
         return [
             CommandHandler("blockchain", self.show_menu),
-            CallbackQueryHandler(self.handle_blockchain_callback, pattern="^(menu_blockchain|blockchain_.*|blockchain_menu)$")
+            CallbackQueryHandler(self.handle_callback, pattern="^(menu_blockchain|blockchain_.*|blockchain_menu)$")
         ]
 
-    async def handle_blockchain_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle blockchain-related callbacks."""
         query = update.callback_query
         await query.answer()
         
         try:
             # Handle both blockchain_ and menu_blockchain patterns
-            original_data = query.data
-            action = query.data.replace("blockchain_", "").replace("menu_blockchain", "menu").replace("blockchain_menu", "menu")
-            logger.info(f"Blockchain handler processing callback: {original_data} -> {action}")
+            action = query.data.replace("menu_blockchain", "menu").replace("blockchain_", "").strip("_")
+            logger.info(f"Blockchain handler processing callback: {query.data} -> {action}")
             
-            if action == "menu":
-                logger.info("Showing blockchain menu")
+            if action == "menu" or action == "":
                 await self.show_menu(update, context)
             elif action == "wallet":
-                logger.info("Showing wallet interface")
                 await self._show_wallet(update, context)
             elif action == "nft":
-                logger.info("Showing NFT options")
                 await self._show_nft_options(update, context)
-            elif action == "back":
-                logger.info("Returning to main menu")
-                await self.bot.show_menu(update, context)
+            elif action == "contracts":
+                await self._show_contract_options(update, context)
+            elif action == "analytics":
+                await self._show_blockchain_analytics(update, context)
             else:
-                logger.warning(f"Unknown action in blockchain handler: {action}")
-                await self._send_or_edit_message(
-                    update,
-                    "This feature is coming soon!",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("« Back", callback_data="blockchain_menu")
-                    ]])
-                )
+                logger.warning(f"Unknown blockchain action: {action}")
+                await self.show_menu(update, context)
+                
         except Exception as e:
             logger.error(f"Error in blockchain callback handler: {str(e)}", exc_info=True)
             await self._send_or_edit_message(
@@ -169,6 +162,60 @@ class BlockchainHandlers(BaseBotHandler):
             "Manage your NFTs and collections:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
+    async def _show_contract_options(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show contract options."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Deploy Contract", callback_data="blockchain_contract_deploy"),
+                InlineKeyboardButton("View Contracts", callback_data="blockchain_contract_view")
+            ],
+            [
+                InlineKeyboardButton("Contract Analytics", callback_data="blockchain_contract_analytics"),
+                InlineKeyboardButton("Manage Gas", callback_data="blockchain_contract_gas")
+            ],
+            [InlineKeyboardButton("« Back", callback_data="blockchain_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "Manage your smart contracts:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _show_blockchain_analytics(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show blockchain analytics."""
+        try:
+            analytics = await self.bot.blockchain_manager.get_analytics()
+            
+            message = (
+                "📊 *Blockchain Analytics*\n\n"
+                f"Total NFTs: {analytics['total_nfts']}\n"
+                f"Total Contracts: {analytics['total_contracts']}\n"
+                f"Total Volume: {analytics['total_volume']} ETH\n"
+                f"Total Revenue: ${analytics['total_revenue']:,.2f}\n\n"
+                "*Top Performing NFTs:*\n"
+            )
+            
+            for nft in analytics['top_nfts'][:5]:
+                message += f"• {nft['title']} - {nft['volume']} ETH\n"
+                
+            message += "\n*Contract Performance:*\n"
+            for contract in analytics['contract_stats']:
+                message += f"• {contract['name']}: {contract['interactions']} interactions\n"
+                
+            keyboard = [[InlineKeyboardButton("« Back", callback_data="blockchain_menu")]]
+            
+            await self._send_or_edit_message(
+                update,
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error showing blockchain analytics: {str(e)}")
+            await self._handle_error(update)
 
     async def show_transaction_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show transaction history."""

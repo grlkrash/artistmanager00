@@ -32,6 +32,7 @@ class TeamHandlers(BaseBotHandler):
     """Handlers for team-related functionality."""
     
     def __init__(self, bot):
+        """Initialize team handlers."""
         super().__init__(bot)
         self.group = 8  # Set handler group
 
@@ -39,41 +40,36 @@ class TeamHandlers(BaseBotHandler):
         """Get team-related handlers."""
         return [
             CommandHandler("team", self.show_menu),
-            CallbackQueryHandler(self.handle_team_callback, pattern="^(menu_team|team_.*|team_menu)$")
+            CallbackQueryHandler(self.handle_callback, pattern="^(menu_team|team_.*|team_menu)$")
         ]
 
-    async def handle_team_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle team-related callbacks."""
         query = update.callback_query
         await query.answer()
         
         try:
             # Handle both team_ and menu_team patterns
-            original_data = query.data
-            action = query.data.replace("team_", "").replace("menu_team", "menu").replace("team_menu", "menu")
-            logger.info(f"Team handler processing callback: {original_data} -> {action}")
+            action = query.data.replace("menu_team", "menu").replace("team_", "").strip("_")
+            logger.info(f"Team handler processing callback: {query.data} -> {action}")
             
-            if action == "menu":
-                logger.info("Showing team menu")
+            if action == "menu" or action == "":
                 await self.show_menu(update, context)
             elif action == "add":
-                logger.info("Showing add member interface")
                 await self._show_add_member(update, context)
             elif action == "view_all":
-                logger.info("Showing all members")
                 await self._show_all_members(update, context)
-            elif action == "back":
-                logger.info("Returning to main menu")
-                await self.bot.show_menu(update, context)
+            elif action == "analytics":
+                await self._show_team_analytics(update, context)
+            elif action == "roles":
+                await self._show_role_management(update, context)
+            elif action.startswith("manage_"):
+                member_id = action.replace("manage_", "")
+                await self._show_member_management(update, context, member_id)
             else:
-                logger.warning(f"Unknown action in team handler: {action}")
-                await self._send_or_edit_message(
-                    update,
-                    "This feature is coming soon!",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("« Back", callback_data="team_menu")
-                    ]])
-                )
+                logger.warning(f"Unknown team action: {action}")
+                await self.show_menu(update, context)
+                
         except Exception as e:
             logger.error(f"Error in team callback handler: {str(e)}", exc_info=True)
             await self._send_or_edit_message(
@@ -128,13 +124,146 @@ class TeamHandlers(BaseBotHandler):
 
     async def _show_all_members(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show all team members."""
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="team_menu")]]
+        # Get team members
+        members = await self.bot.team_manager.get_team_members()
+        
+        if not members:
+            keyboard = [
+                [InlineKeyboardButton("Add Member", callback_data="team_add")],
+                [InlineKeyboardButton("« Back", callback_data="team_menu")]
+            ]
+            await self._send_or_edit_message(
+                update,
+                "Your team is empty. Would you like to add a member?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+            
+        # Format team message
+        message = "👥 Your Team:\n\n"
+        keyboard = []
+        
+        for member in members:
+            message += f"👤 {member.name}\n"
+            message += f"Role: {member.role}\n"
+            message += f"Rate: ${member.rate}/hr\n"
+            message += f"Skills: {', '.join(member.skills)}\n\n"
+            
+            keyboard.append([
+                InlineKeyboardButton(f"Manage: {member.name[:20]}...", callback_data=f"team_manage_{member.id}")
+            ])
+            
+        keyboard.append([InlineKeyboardButton("« Back", callback_data="team_menu")])
         
         await self._send_or_edit_message(
             update,
-            "Your team members will appear here soon!",
+            message,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
+    async def _show_team_analytics(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show team analytics."""
+        try:
+            analytics = await self.bot.team_manager.get_team_analytics()
+            
+            message = (
+                "📊 *Team Analytics*\n\n"
+                f"Total Members: {analytics['total_members']}\n"
+                f"Active Projects: {analytics['active_projects']}\n"
+                f"Total Hours: {analytics['total_hours']}\n"
+                f"Total Cost: ${analytics['total_cost']:,.2f}\n\n"
+                "*Team Composition:*\n"
+            )
+            
+            for role, count in analytics['roles'].items():
+                message += f"• {role}: {count}\n"
+                
+            message += "\n*Project Distribution:*\n"
+            for project in analytics['project_distribution']:
+                message += f"• {project['name']}: {project['members']} members\n"
+                
+            keyboard = [[InlineKeyboardButton("« Back", callback_data="team_menu")]]
+            
+            await self._send_or_edit_message(
+                update,
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error showing team analytics: {str(e)}")
+            await self._handle_error(update)
+
+    async def _show_role_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show role management options."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Add Role", callback_data="team_role_add"),
+                InlineKeyboardButton("Edit Roles", callback_data="team_role_edit")
+            ],
+            [
+                InlineKeyboardButton("Role Analytics", callback_data="team_role_analytics"),
+                InlineKeyboardButton("Role Permissions", callback_data="team_role_permissions")
+            ],
+            [InlineKeyboardButton("« Back", callback_data="team_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "Manage team roles and permissions:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _show_member_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE, member_id: str) -> None:
+        """Show management options for a specific team member."""
+        try:
+            member = await self.bot.team_manager.get_team_member(member_id)
+            if not member:
+                await self._send_or_edit_message(
+                    update,
+                    "Team member not found.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("« Back", callback_data="team_menu")
+                    ]])
+                )
+                return
+                
+            # Format member details
+            message = (
+                f"👤 {member.name}\n\n"
+                f"Role: {member.role}\n"
+                f"Email: {member.email}\n"
+                f"Rate: ${member.rate}/hr\n"
+                f"Skills: {', '.join(member.skills)}\n"
+                f"Joined: {member.joined_date.strftime('%Y-%m-%d')}\n"
+            )
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("Edit Details", callback_data=f"team_edit_{member.id}"),
+                    InlineKeyboardButton("Change Role", callback_data=f"team_role_{member.id}")
+                ],
+                [
+                    InlineKeyboardButton("Update Rate", callback_data=f"team_rate_{member.id}"),
+                    InlineKeyboardButton("View Projects", callback_data=f"team_projects_{member.id}")
+                ],
+                [
+                    InlineKeyboardButton("Remove Member", callback_data=f"team_remove_{member.id}"),
+                    InlineKeyboardButton("View Analytics", callback_data=f"team_member_analytics_{member.id}")
+                ],
+                [InlineKeyboardButton("« Back", callback_data="team_menu")]
+            ]
+            
+            await self._send_or_edit_message(
+                update,
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+        except Exception as e:
+            logger.error(f"Error showing member management: {str(e)}")
+            await self._handle_error(update)
 
     async def show_team(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show all team members."""
@@ -356,48 +485,6 @@ class TeamHandlers(BaseBotHandler):
             logger.error(f"Error showing payments: {str(e)}")
             await update.message.reply_text(
                 "Sorry, there was an error loading payments. Please try again."
-            )
-
-    async def _show_member_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE, member_id: str) -> None:
-        """Show member management options."""
-        try:
-            member = await self.bot.team_manager.get_collaborator(member_id)
-            if not member:
-                await update.callback_query.edit_message_text(
-                    "Team member not found. They may have been removed."
-                )
-                return
-                
-            message = (
-                f"👤 {member.name}\n\n"
-                f"Role: {member.role}\n"
-                f"Email: {member.email}\n"
-                f"Rate: ${member.rate}/hr\n"
-                f"Skills: {', '.join(member.skills)}\n"
-                f"Joined: {member.joined_date.strftime('%Y-%m-%d')}\n"
-            )
-            
-            keyboard = [
-                [
-                    InlineKeyboardButton("Edit Details", callback_data=f"team_edit_{member_id}"),
-                    InlineKeyboardButton("Remove Member", callback_data=f"team_remove_{member_id}")
-                ],
-                [
-                    InlineKeyboardButton("Create Payment", callback_data=f"team_payment_create_{member_id}"),
-                    InlineKeyboardButton("View History", callback_data=f"team_history_{member_id}")
-                ],
-                [InlineKeyboardButton("Back to Team", callback_data="team_view")]
-            ]
-            
-            await update.callback_query.edit_message_text(
-                message,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            
-        except Exception as e:
-            logger.error(f"Error showing member management: {str(e)}")
-            await update.callback_query.edit_message_text(
-                "Sorry, there was an error loading the team member. Please try again."
             )
 
     async def _start_payment_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:

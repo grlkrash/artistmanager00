@@ -30,7 +30,8 @@ class NameChangeHandlers(BaseBotHandler):
     def get_handlers(self) -> List[BaseHandler]:
         """Get name change-related handlers."""
         return [
-            self.get_conversation_handler()
+            self.get_conversation_handler(),
+            CallbackQueryHandler(self.handle_callback, pattern="^name_(.*|settings_.*)$")
         ]
 
     def get_conversation_handler(self) -> ConversationHandler:
@@ -185,4 +186,67 @@ class NameChangeHandlers(BaseBotHandler):
                 [InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]
             ])
         )
-        return ConversationHandler.END 
+        return ConversationHandler.END
+
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle name change-related callbacks."""
+        query = update.callback_query
+        await query.answer()
+        
+        try:
+            action = query.data.replace("name_", "")
+            logger.info(f"Name change handler processing callback: {query.data} -> {action}")
+            
+            if action == "menu":
+                await self.show_menu(update, context)
+            elif action == "change":
+                await self.start_name_change(update, context)
+            elif action == "keep":
+                await self._keep_current_name(update, context)
+            elif action == "cancel":
+                await self.cancel(update, context)
+            else:
+                logger.warning(f"Unknown name change action: {action}")
+                await self.show_menu(update, context)
+                
+        except Exception as e:
+            logger.error(f"Error in name change callback handler: {str(e)}", exc_info=True)
+            await self._send_or_edit_message(
+                update,
+                "Sorry, something went wrong. Please try again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="name_menu")
+                ]])
+            )
+
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the name change menu."""
+        current_name = context.bot_data.get('manager_name', 'Kennedy Young')
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("Change Name", callback_data="name_change"),
+                InlineKeyboardButton("Keep Current", callback_data="name_keep")
+            ],
+            [InlineKeyboardButton("« Back to Settings", callback_data="settings_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            f"🤖 *Bot Name Settings*\n\n"
+            f"Current name: {current_name}\n\n"
+            "Would you like to change my name?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    async def _keep_current_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle keeping current name."""
+        current_name = context.bot_data.get('manager_name', 'Kennedy Young')
+        await self._send_or_edit_message(
+            update,
+            f"I'll keep my name as {current_name}.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("« Back to Settings", callback_data="settings_menu")
+            ]])
+        ) 

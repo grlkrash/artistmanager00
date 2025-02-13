@@ -46,42 +46,33 @@ class AutoHandlers(BaseBotHandler):
         """Get auto mode-related handlers."""
         return [
             CommandHandler("auto", self.show_menu),
-            CallbackQueryHandler(self.handle_auto_callback, pattern="^(menu_auto|auto_.*|auto_menu)$"),
-            self.get_conversation_handler()
+            CallbackQueryHandler(self.handle_callback, pattern="^(menu_auto|auto_.*|auto_menu)$")
         ]
 
-    async def handle_auto_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle auto mode-related callbacks."""
         query = update.callback_query
         await query.answer()
         
         try:
             # Handle both auto_ and menu_auto patterns
-            original_data = query.data
-            action = query.data.replace("auto_", "").replace("menu_auto", "menu").replace("auto_menu", "menu")
-            logger.info(f"Auto mode handler processing callback: {original_data} -> {action}")
+            action = query.data.replace("menu_auto", "menu").replace("auto_", "").strip("_")
+            logger.info(f"Auto mode handler processing callback: {query.data} -> {action}")
             
-            if action == "menu":
-                logger.info("Showing auto mode menu")
+            if action == "menu" or action == "":
                 await self.show_menu(update, context)
             elif action == "enable":
-                logger.info("Enabling auto mode")
                 await self._enable_auto_mode(update, context)
             elif action == "disable":
-                logger.info("Disabling auto mode")
                 await self._disable_auto_mode(update, context)
-            elif action == "back":
-                logger.info("Returning to main menu")
-                await self.bot.show_menu(update, context)
+            elif action == "configure":
+                await self._show_configure_options(update, context)
+            elif action == "status":
+                await self._show_status(update, context)
             else:
-                logger.warning(f"Unknown action in auto mode handler: {action}")
-                await self._send_or_edit_message(
-                    update,
-                    "This feature is coming soon!",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("« Back", callback_data="auto_menu")
-                    ]])
-                )
+                logger.warning(f"Unknown auto mode action: {action}")
+                await self.show_menu(update, context)
+                
         except Exception as e:
             logger.error(f"Error in auto mode callback handler: {str(e)}", exc_info=True)
             await self._send_or_edit_message(
@@ -146,6 +137,26 @@ class AutoHandlers(BaseBotHandler):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
+    async def _show_configure_options(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show auto mode configuration options."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Check Frequency", callback_data="auto_config_freq"),
+                InlineKeyboardButton("AI Level", callback_data="auto_config_ai")
+            ],
+            [
+                InlineKeyboardButton("Notifications", callback_data="auto_config_notif"),
+                InlineKeyboardButton("Task Limit", callback_data="auto_config_tasks")
+            ],
+            [InlineKeyboardButton("« Back", callback_data="auto_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "Configure auto mode settings:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
     async def _show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show current auto mode status."""
         try:
@@ -172,20 +183,19 @@ class AutoHandlers(BaseBotHandler):
                     InlineKeyboardButton("Enable" if not self._auto_mode else "Disable",
                                        callback_data="auto_enable" if not self._auto_mode else "auto_disable")
                 ],
-                [InlineKeyboardButton("Configure Settings", callback_data="auto_settings")],
-                [InlineKeyboardButton("« Back", callback_data="auto_back")]
+                [InlineKeyboardButton("Configure Settings", callback_data="auto_configure")],
+                [InlineKeyboardButton("« Back", callback_data="auto_menu")]
             ]
             
-            await update.callback_query.edit_message_text(
+            await self._send_or_edit_message(
+                update,
                 message,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             
         except Exception as e:
             logger.error(f"Error showing auto mode status: {str(e)}")
-            await update.callback_query.edit_message_text(
-                "Sorry, there was an error loading the status. Please try again."
-            )
+            await self._handle_error(update)
 
     async def _process_tasks(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Background task for auto mode processing."""

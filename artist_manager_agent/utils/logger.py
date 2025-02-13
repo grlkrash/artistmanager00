@@ -86,43 +86,8 @@ def setup_logging(level: int, format_str: str) -> None:
 # Create default logger
 logger = get_logger("artist_manager")
 
-# Configure logging
-logger.setLevel(logging.INFO)
-
-# Console handler
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-console_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(console_format)
-
-# File handler for general logs
-file_handler = logging.handlers.RotatingFileHandler(
-    'logs/artist_manager.log',
-    maxBytes=10485760,  # 10MB
-    backupCount=5
-)
-file_handler.setLevel(logging.INFO)
-file_format = logging.Formatter(
-    '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
-)
-file_handler.setFormatter(file_format)
-
-# Error file handler
-error_handler = logging.handlers.RotatingFileHandler(
-    'logs/errors.log',
-    maxBytes=10485760,  # 10MB
-    backupCount=5
-)
-error_handler.setLevel(logging.ERROR)
-error_handler.setFormatter(file_format)
-
-# Add handlers to logger
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
-logger.addHandler(error_handler)
-
-# Export for convenience
-log = logger.info
+# Export convenience functions
+info = logger.info
 error = logger.error
 warning = logger.warning
 debug = logger.debug
@@ -131,8 +96,9 @@ __all__ = [
     'get_logger',
     'log_event',
     'log_error',
+    'setup_logging',
     'logger',
-    'log',
+    'info',
     'error',
     'warning',
     'debug'

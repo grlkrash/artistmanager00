@@ -46,27 +46,34 @@ class GoalHandlers(BaseBotHandler):
         await query.answer()
         
         try:
-            action = query.data.replace("menu_goals", "").replace("goal_", "").strip("_")
+            # Handle both goal_ and menu_goals patterns
+            action = query.data.replace("menu_goals", "menu").replace("goal_", "").strip("_")
+            logger.info(f"Goal handler processing callback: {query.data} -> {action}")
             
             if action == "menu" or action == "":
                 await self.show_menu(update, context)
-            elif action == "create":
+            elif action == "add":
                 await self.start_goal_creation(update, context)
-            elif action == "list":
-                await self.list_goals(update, context)
-            elif action == "complete":
-                await self.mark_goal_complete(update, context)
+            elif action == "view_all":
+                await self._show_all_goals(update, context)
+            elif action == "analytics":
+                await self.show_goal_analytics(update, context)
+            elif action == "archive":
+                await self._show_archived_goals(update, context)
+            elif action.startswith("manage_"):
+                goal_id = action.replace("manage_", "")
+                await self._show_goal_management(update, context, goal_id)
             else:
                 logger.warning(f"Unknown goal action: {action}")
                 await self.show_menu(update, context)
-            
+                
         except Exception as e:
-            logger.error(f"Error handling goal callback: {str(e)}")
+            logger.error(f"Error in goal callback handler: {str(e)}", exc_info=True)
             await self._send_or_edit_message(
                 update,
                 "Sorry, something went wrong. Please try again.",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("« Back", callback_data="menu_goals")
+                    InlineKeyboardButton("« Back", callback_data="goal_menu")
                 ]])
             )
 
@@ -416,4 +423,97 @@ class GoalHandlers(BaseBotHandler):
             "What would you like to do?",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
-        ) 
+        )
+
+    async def _show_archived_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show archived goals."""
+        # Get user's archived goals
+        user_id = update.effective_user.id
+        goals = await self.bot.task_manager_integration.get_goals(user_id, archived=True)
+        
+        if not goals:
+            keyboard = [[InlineKeyboardButton("« Back", callback_data="goal_menu")]]
+            await self._send_or_edit_message(
+                update,
+                "You don't have any archived goals.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+            
+        # Format goals message
+        message = "📁 Archived Goals:\n\n"
+        keyboard = []
+        
+        for goal in goals:
+            message += f"🔒 {goal.title}\n"
+            if goal.completion_date:
+                message += f"Completed: {goal.completion_date.strftime('%Y-%m-%d')}\n"
+            message += "\n"
+            
+            keyboard.append([
+                InlineKeyboardButton(f"Restore: {goal.title[:20]}...", callback_data=f"goal_restore_{goal.id}")
+            ])
+            
+        keyboard.append([InlineKeyboardButton("« Back", callback_data="goal_menu")])
+        
+        await self._send_or_edit_message(
+            update,
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _show_goal_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE, goal_id: str) -> None:
+        """Show management options for a specific goal."""
+        try:
+            goal = await self.bot.task_manager_integration.get_goal(goal_id)
+            if not goal:
+                await self._send_or_edit_message(
+                    update,
+                    "Goal not found.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("« Back", callback_data="goal_menu")
+                    ]])
+                )
+                return
+                
+            # Format goal details
+            message = (
+                f"🎯 {goal.title}\n\n"
+                f"Description: {goal.description}\n"
+                f"Priority: {goal.priority}\n"
+                f"Progress: {goal.get_progress()}%\n"
+            )
+            if goal.due_date:
+                message += f"Due: {goal.due_date.strftime('%Y-%m-%d')}\n"
+                
+            keyboard = [
+                [
+                    InlineKeyboardButton("Update Progress", callback_data=f"goal_progress_{goal.id}"),
+                    InlineKeyboardButton("Edit Goal", callback_data=f"goal_edit_{goal.id}")
+                ],
+                [
+                    InlineKeyboardButton("Add Task", callback_data=f"goal_add_task_{goal.id}"),
+                    InlineKeyboardButton("View Tasks", callback_data=f"goal_tasks_{goal.id}")
+                ],
+                [
+                    InlineKeyboardButton("Archive Goal", callback_data=f"goal_archive_{goal.id}"),
+                    InlineKeyboardButton("Delete Goal", callback_data=f"goal_delete_{goal.id}")
+                ],
+                [InlineKeyboardButton("« Back", callback_data="goal_menu")]
+            ]
+            
+            await self._send_or_edit_message(
+                update,
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+        except Exception as e:
+            logger.error(f"Error showing goal management: {str(e)}")
+            await self._send_or_edit_message(
+                update,
+                "Sorry, there was an error loading the goal. Please try again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="goal_menu")
+                ]])
+            ) 

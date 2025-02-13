@@ -36,7 +36,7 @@ class TaskHandlers(BaseBotHandler):
         """Get task-related handlers."""
         return [
             CommandHandler("tasks", self.show_menu),
-            CallbackQueryHandler(self.handle_task_callback, pattern="^(menu_tasks|task_.*|task_menu)$"),
+            CallbackQueryHandler(self.handle_callback, pattern="^(menu_tasks|task_.*|task_menu)$"),
             self.get_conversation_handler()
         ]
 
@@ -101,39 +101,42 @@ class TaskHandlers(BaseBotHandler):
             logger.error(f"Error showing task menu: {str(e)}")
             await self._handle_error(update)
 
-    async def handle_task_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle task-related callbacks."""
         query = update.callback_query
         await query.answer()
         
         try:
             # Handle both task_ and menu_tasks patterns
-            original_data = query.data
-            action = query.data.replace("task_", "").replace("menu_tasks", "menu")
-            logger.info(f"Task handler processing callback: {original_data} -> {action}")
+            action = query.data.replace("menu_tasks", "menu").replace("task_", "").strip("_")
+            logger.info(f"Task handler processing callback: {query.data} -> {action}")
             
-            if action == "menu":
-                logger.info("Showing tasks menu")
+            if action == "menu" or action == "":
                 await self.show_menu(update, context)
-            elif action == "add" or action == "create":
-                logger.info("Starting task creation")
-                await self.start_task_creation(update, context)
-            elif action == "view_all" or action == "view":
-                logger.info("Showing task details")
-                await self.show_task_details(update, context)
-            elif action == "back":
-                logger.info("Returning to main menu")
-                await self.bot.show_menu(update, context)
+            elif action == "add":
+                await self._show_add_task(update, context)
+            elif action == "view_all":
+                await self._show_all_tasks(update, context)
+            elif action == "analytics":
+                await self._show_task_analytics(update, context)
+            elif action == "archive":
+                await self._show_archived_tasks(update, context)
             elif action.startswith("manage_"):
                 task_id = action.replace("manage_", "")
-                logger.info(f"Managing task: {task_id}")
                 await self._show_task_management(update, context, task_id)
             else:
-                logger.warning(f"Unknown action in task handler: {action}")
-                await self._handle_error(update)
+                logger.warning(f"Unknown task action: {action}")
+                await self.show_menu(update, context)
+                
         except Exception as e:
             logger.error(f"Error in task callback handler: {str(e)}", exc_info=True)
-            await self._handle_error(update)
+            await self._send_or_edit_message(
+                update,
+                "Sorry, something went wrong. Please try again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="task_menu")
+                ]])
+            )
 
     async def start_task_creation(self, message: Message, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Start the task creation process."""
@@ -474,4 +477,178 @@ class TaskHandlers(BaseBotHandler):
             logger.error(f"Error showing task analytics: {str(e)}")
             await message.reply_text(
                 "Sorry, there was an error retrieving task analytics. Please try again later."
-            ) 
+            )
+
+    async def _show_add_task(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show task creation interface."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Quick Task", callback_data="task_quick"),
+                InlineKeyboardButton("Detailed Task", callback_data="task_detailed")
+            ],
+            [InlineKeyboardButton("« Back", callback_data="task_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "How would you like to create your task?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _show_all_tasks(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show all user tasks."""
+        # Get user's tasks
+        user_id = update.effective_user.id
+        tasks = await self.bot.task_manager_integration.get_tasks(user_id)
+        
+        if not tasks:
+            keyboard = [
+                [InlineKeyboardButton("Create Task", callback_data="task_add")],
+                [InlineKeyboardButton("« Back", callback_data="task_menu")]
+            ]
+            await self._send_or_edit_message(
+                update,
+                "You don't have any tasks yet. Would you like to create one?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+            
+        # Format tasks message
+        message = "📝 Your Tasks:\n\n"
+        keyboard = []
+        
+        for task in tasks:
+            status = "✅" if task.completed else "🔄"
+            message += f"{status} {task.title}\n"
+            if task.due_date:
+                message += f"Due: {task.due_date.strftime('%Y-%m-%d')}\n"
+            message += "\n"
+            
+            keyboard.append([
+                InlineKeyboardButton(f"Manage: {task.title[:20]}...", callback_data=f"task_manage_{task.id}")
+            ])
+            
+        keyboard.append([InlineKeyboardButton("« Back", callback_data="task_menu")])
+        
+        await self._send_or_edit_message(
+            update,
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _show_task_analytics(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show task analytics."""
+        try:
+            analytics = await self.bot.task_manager_integration.get_task_analytics()
+            
+            message = (
+                "📊 *Task Analytics*\n\n"
+                f"Total Tasks: {analytics['total_tasks']}\n"
+                f"Completed: {analytics['completed_tasks']}\n"
+                f"In Progress: {analytics['in_progress_tasks']}\n"
+                f"Overdue: {analytics['overdue_tasks']}\n\n"
+                "*Tasks by Priority:*\n"
+                f"🔴 High: {analytics['tasks_by_priority']['high']}\n"
+                f"🟡 Medium: {analytics['tasks_by_priority']['medium']}\n"
+                f"🟢 Low: {analytics['tasks_by_priority']['low']}\n\n"
+                "*Tasks by Category:*\n"
+            )
+            
+            for category, count in analytics['tasks_by_category'].items():
+                message += f"{category}: {count}\n"
+                
+            keyboard = [[InlineKeyboardButton("« Back", callback_data="task_menu")]]
+            
+            await self._send_or_edit_message(
+                update,
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error showing task analytics: {str(e)}")
+            await self._handle_error(update)
+
+    async def _show_archived_tasks(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show archived tasks."""
+        # Get user's archived tasks
+        user_id = update.effective_user.id
+        tasks = await self.bot.task_manager_integration.get_tasks(user_id, archived=True)
+        
+        if not tasks:
+            keyboard = [[InlineKeyboardButton("« Back", callback_data="task_menu")]]
+            await self._send_or_edit_message(
+                update,
+                "You don't have any archived tasks.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+            
+        # Format tasks message
+        message = "📁 Archived Tasks:\n\n"
+        keyboard = []
+        
+        for task in tasks:
+            message += f"🔒 {task.title}\n"
+            if task.completion_date:
+                message += f"Completed: {task.completion_date.strftime('%Y-%m-%d')}\n"
+            message += "\n"
+            
+            keyboard.append([
+                InlineKeyboardButton(f"Restore: {task.title[:20]}...", callback_data=f"task_restore_{task.id}")
+            ])
+            
+        keyboard.append([InlineKeyboardButton("« Back", callback_data="task_menu")])
+        
+        await self._send_or_edit_message(
+            update,
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _show_task_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: str) -> None:
+        """Show management options for a specific task."""
+        try:
+            task = await self.bot.task_manager_integration.get_task(task_id)
+            if not task:
+                await self._send_or_edit_message(
+                    update,
+                    "Task not found.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("« Back", callback_data="task_menu")
+                    ]])
+                )
+                return
+                
+            # Format task details
+            message = (
+                f"📝 {task.title}\n\n"
+                f"Description: {task.description}\n"
+                f"Priority: {task.priority}\n"
+                f"Status: {'✅ Completed' if task.completed else '🔄 In Progress'}\n"
+            )
+            if task.due_date:
+                message += f"Due: {task.due_date.strftime('%Y-%m-%d')}\n"
+                
+            keyboard = [
+                [
+                    InlineKeyboardButton("Mark Complete", callback_data=f"task_complete_{task.id}"),
+                    InlineKeyboardButton("Edit Task", callback_data=f"task_edit_{task.id}")
+                ],
+                [
+                    InlineKeyboardButton("Archive Task", callback_data=f"task_archive_{task.id}"),
+                    InlineKeyboardButton("Delete Task", callback_data=f"task_delete_{task.id}")
+                ],
+                [InlineKeyboardButton("« Back", callback_data="task_menu")]
+            ]
+            
+            await self._send_or_edit_message(
+                update,
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+        except Exception as e:
+            logger.error(f"Error showing task management: {str(e)}")
+            await self._handle_error(update) 

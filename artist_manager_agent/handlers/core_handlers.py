@@ -1,7 +1,7 @@
 """Core handlers for the Artist Manager Bot."""
 from typing import List
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, BaseHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, error
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters, BaseHandler
 from .base_handler import BaseBotHandler
 from ..utils.logger import get_logger
 
@@ -13,16 +13,53 @@ class CoreHandlers(BaseBotHandler):
     def __init__(self, bot):
         super().__init__(bot)
         self.group = 1  # Core handler group
+        logger.info("Initialized CoreHandlers with group 1")
 
     def get_handlers(self) -> List[BaseHandler]:
         """Get core command handlers."""
-        return [
-            CommandHandler("help", self.show_help),
-            CommandHandler("settings", self.show_settings),
-            CallbackQueryHandler(self.handle_core_callback, pattern="^core_(.*|settings_.*)$")
+        logger.info("Registering core handlers")
+        handlers = [
+            CommandHandler("start", self.start, block=False),
+            CommandHandler("help", self.show_help, block=False),
+            CommandHandler("settings", self.show_settings, block=False),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message, block=False),
+            CallbackQueryHandler(self.handle_callback, pattern="^core_(.*|settings_.*)$", block=False)
         ]
+        logger.debug(f"Core handlers: {[type(h).__name__ for h in handlers]}")
+        logger.info(f"Registered {len(handlers)} core handlers")
+        return handlers
 
-    async def handle_core_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /start command."""
+        logger.debug("Start command received")
+        try:
+            user = update.effective_user
+            user_id = str(user.id)
+            logger.info(f"Start command from user {user_id}")
+            
+            # Check if user has a profile
+            logger.debug("Checking for user profile")
+            profile = self.bot.profiles.get(user_id)
+            logger.debug(f"Profile found: {profile is not None}")
+            
+            if profile:
+                # Returning user - show dashboard
+                logger.info(f"Existing profile found for user {user_id}, showing dashboard")
+                await self.show_menu(update, context)
+            else:
+                # New user - start onboarding
+                logger.info(f"No profile found for user {user_id}, starting onboarding")
+                logger.debug("Calling onboarding.start_onboarding")
+                await self.bot.onboarding.start_onboarding(update, context)
+                logger.debug("Onboarding started")
+                
+            logger.debug("Start command processed successfully")
+            
+        except Exception as e:
+            logger.error(f"Error in start command: {str(e)}", exc_info=True)
+            await self.handle_error(update, context)
+
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle core-related callbacks."""
         query = update.callback_query
         await query.answer()
@@ -175,4 +212,65 @@ class CoreHandlers(BaseBotHandler):
             update,
             "You don't have a profile yet. Would you like to create one?",
             reply_markup=InlineKeyboardMarkup(keyboard)
-        ) 
+        )
+
+    async def show_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show settings menu."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Notifications 🔔", callback_data="core_settings_notifications"),
+                InlineKeyboardButton("Privacy 🔒", callback_data="core_settings_privacy")
+            ],
+            [
+                InlineKeyboardButton("Language 🌐", callback_data="core_settings_language"),
+                InlineKeyboardButton("Theme 🎨", callback_data="core_settings_theme")
+            ],
+            [InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "⚙️ *Settings*\n\n"
+            "Configure your preferences:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle text messages."""
+        message = update.message.text
+        user_id = str(update.effective_user.id)
+        profile = self.bot.profiles.get(user_id)
+        
+        if not profile:
+            # New user - start onboarding
+            await self.bot.onboarding.start_onboarding(update, context)
+            return
+            
+        # For now, just show the main menu for any text message
+        await self.show_menu(update, context)
+
+    async def handle_error(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle errors."""
+        logger.error(f"Error handling update {update}: {context.error}")
+        
+        try:
+            if update and update.effective_message:
+                error_message = "Sorry, something went wrong. Please try again later."
+                if isinstance(context.error, TimeoutError):
+                    error_message = "Request timed out. Please try again."
+                elif isinstance(context.error, error.NetworkError):
+                    error_message = "Network error occurred. Please check your connection."
+                elif isinstance(context.error, error.BadRequest):
+                    error_message = "Invalid request. Please try again."
+                elif isinstance(context.error, error.Unauthorized):
+                    error_message = "Authentication failed. Please check your bot token."
+                
+                await update.effective_message.reply_text(
+                    error_message,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("« Back to Menu", callback_data="menu_main")
+                    ]])
+                )
+        except Exception as e:
+            logger.error(f"Error in error handler: {e}") 

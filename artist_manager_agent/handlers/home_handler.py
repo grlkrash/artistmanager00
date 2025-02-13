@@ -2,13 +2,12 @@
 from typing import List
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ContextTypes,
     CommandHandler,
     CallbackQueryHandler,
+    ContextTypes,
     BaseHandler
 )
 from .base_handler import BaseBotHandler
-
 from ..utils.logger import get_logger
 from ..models import ArtistProfile
 
@@ -18,6 +17,7 @@ class HomeHandlers(BaseBotHandler):
     """Handlers for home/main menu functionality."""
     
     def __init__(self, bot):
+        """Initialize home handlers."""
         super().__init__(bot)
         self.group = 9  # Set handler group
 
@@ -25,77 +25,111 @@ class HomeHandlers(BaseBotHandler):
         """Get home menu handlers."""
         return [
             CommandHandler("home", self.show_menu),
-            CallbackQueryHandler(self.show_menu, pattern="^home_menu$"),
-            CallbackQueryHandler(self.handle_menu_callback, pattern="^home_(.*|menu_.*)$")
+            CallbackQueryHandler(self.handle_callback, pattern="^(home_menu|home_.*|menu_.*)$")
         ]
 
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Start the bot and show welcome message."""
-        # Get manager name from context or use default
-        manager_name = context.bot_data.get('manager_name', 'Kennedy Young')
-        
-        # Welcome message
-        welcome_text = (
-            f"Hi! I'm {manager_name}, your AI Artist Manager. "
-            "I'm here to help you manage your music career and creative projects.\n\n"
-            "Here's what I can do for you:"
-        )
-        
-        # Create menu keyboard
-        keyboard = [
-            [InlineKeyboardButton("🎯 Goals", callback_data="menu_goals")],
-            [InlineKeyboardButton("📝 Tasks", callback_data="menu_tasks")],
-            [InlineKeyboardButton("📂 Projects", callback_data="menu_projects")],
-            [InlineKeyboardButton("🎵 Music", callback_data="menu_music")],
-            [InlineKeyboardButton("⛓️ Blockchain", callback_data="menu_blockchain")],
-            [InlineKeyboardButton("🤖 Auto", callback_data="menu_auto")],
-            [InlineKeyboardButton("👥 Team", callback_data="menu_team")],
-            [InlineKeyboardButton("⚙️ Settings", callback_data="menu_settings")]
-        ]
-        
-        await self._send_or_edit_message(
-            update,
-            welcome_text,
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Show the main menu."""
-        # Get manager name from context or use default
-        manager_name = context.bot_data.get('manager_name', 'Kennedy Young')
-        
-        # Menu message
-        menu_text = f"Hi! I'm {manager_name}. What would you like to do?"
-        
-        # Create menu keyboard
-        keyboard = [
-            [InlineKeyboardButton("🎯 Goals", callback_data="menu_goals")],
-            [InlineKeyboardButton("📝 Tasks", callback_data="menu_tasks")],
-            [InlineKeyboardButton("📂 Projects", callback_data="menu_projects")],
-            [InlineKeyboardButton("🎵 Music", callback_data="menu_music")],
-            [InlineKeyboardButton("⛓️ Blockchain", callback_data="menu_blockchain")],
-            [InlineKeyboardButton("🤖 Auto", callback_data="menu_auto")],
-            [InlineKeyboardButton("👥 Team", callback_data="menu_team")],
-            [InlineKeyboardButton("⚙️ Settings", callback_data="menu_settings")]
-        ]
-        
-        await self._send_or_edit_message(
-            update,
-            menu_text,
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    async def handle_menu_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle menu callbacks by routing to appropriate handlers."""
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle home-related callbacks."""
         query = update.callback_query
         await query.answer()
         
-        # Log the callback data for debugging
-        logger.info(f"Menu callback received: {query.data}")
+        try:
+            # Handle both home_ and menu_ patterns
+            action = query.data.replace("menu_", "").replace("home_", "").strip("_")
+            logger.info(f"Home handler processing callback: {query.data} -> {action}")
+            
+            if action == "menu" or action == "":
+                await self.show_menu(update, context)
+            elif action == "goals":
+                await self.bot.goal_handlers.show_menu(update, context)
+            elif action == "tasks":
+                await self.bot.task_handlers.show_menu(update, context)
+            elif action == "projects":
+                await self.bot.project_handlers.show_menu(update, context)
+            elif action == "music":
+                await self.bot.music_handlers.show_menu(update, context)
+            elif action == "team":
+                await self.bot.team_handlers.show_menu(update, context)
+            elif action == "auto":
+                await self.bot.auto_handlers.show_menu(update, context)
+            elif action == "blockchain":
+                await self.bot.blockchain_handlers.show_menu(update, context)
+            elif action == "profile":
+                await self._show_profile(update, context)
+            else:
+                logger.warning(f"Unknown home action: {action}")
+                await self.show_menu(update, context)
+                
+        except Exception as e:
+            logger.error(f"Error in home callback handler: {str(e)}", exc_info=True)
+            await self._send_or_edit_message(
+                update,
+                "Sorry, something went wrong. Please try again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="home_menu")
+                ]])
+            )
+
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the main menu."""
+        keyboard = [
+            [
+                InlineKeyboardButton("Goals 🎯", callback_data="menu_goals"),
+                InlineKeyboardButton("Tasks 📝", callback_data="menu_tasks")
+            ],
+            [
+                InlineKeyboardButton("Projects 🚀", callback_data="menu_projects"),
+                InlineKeyboardButton("Music 🎵", callback_data="menu_music")
+            ],
+            [
+                InlineKeyboardButton("Team 👥", callback_data="menu_team"),
+                InlineKeyboardButton("Auto Mode ⚙️", callback_data="menu_auto")
+            ],
+            [
+                InlineKeyboardButton("Blockchain 🔗", callback_data="menu_blockchain"),
+                InlineKeyboardButton("Profile 👤", callback_data="menu_profile")
+            ]
+        ]
         
-        # The actual handling of these callbacks is done by their respective handlers
-        # This handler exists mainly for logging and debugging purposes
-        pass
+        await self._send_or_edit_message(
+            update,
+            "🎵 *Welcome to Artist Manager Bot* 🎵\n\n"
+            "What would you like to manage today?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    async def _show_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show user profile."""
+        user_id = str(update.effective_user.id)
+        profile = self.bot.profiles.get(user_id)
+        
+        if not profile:
+            keyboard = [[InlineKeyboardButton("Create Profile", callback_data="menu_profile_create")]]
+            await self._send_or_edit_message(
+                update,
+                "You don't have a profile yet. Would you like to create one?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+            
+        keyboard = [
+            [
+                InlineKeyboardButton("Edit Profile", callback_data="menu_profile_edit"),
+                InlineKeyboardButton("View Stats", callback_data="menu_profile_stats")
+            ],
+            [InlineKeyboardButton("« Back to Menu", callback_data="home_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            f"👤 *{profile.name}*\n\n"
+            f"Genre: {profile.genre}\n"
+            f"Career Stage: {profile.career_stage}\n\n"
+            "What would you like to do?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
 
 async def show_feature_unavailable(query, feature_name: str) -> None:
     """Show a consistent message for unavailable features."""

@@ -23,147 +23,124 @@ from .utils.config import (
     DATA_DIR,
     PERSISTENCE_PATH,
     LOG_LEVEL,
-    LOG_FORMAT
+    LOG_FORMAT,
+    load_env_vars
 )
 
 logger = get_logger(__name__)
 
-def write_pid_file():
-    """Write PID file for process tracking."""
-    pid = os.getpid()
+def check_running_instance():
+    """Check if another instance is running and kill it."""
     pid_file = Path(DATA_DIR) / "bot.pid"
-    pid_file.write_text(str(pid))
-    return pid_file
-
-def cleanup_pid_file(pid_file):
-    """Clean up PID file on exit."""
-    try:
-        pid_file.unlink()
-    except Exception as e:
-        logger.error(f"Error removing PID file: {e}")
-
-def kill_existing_bot():
-    """Kill any existing bot process."""
-    try:
-        pid_file = Path(DATA_DIR) / "bot.pid"
-        if pid_file.exists():
+    
+    if pid_file.exists():
+        try:
             pid = int(pid_file.read_text())
-            try:
+            if psutil.pid_exists(pid):
                 process = psutil.Process(pid)
-                if process.is_running():
+                if process.name().startswith('python'):
+                    logger.info(f"Killing existing bot process {pid}")
                     process.terminate()
                     process.wait(timeout=5)
-            except psutil.NoSuchProcess:
-                pass
-            pid_file.unlink()
-    except Exception as e:
-        logger.error(f"Error killing existing bot: {e}")
+        except (ValueError, psutil.NoSuchProcess, psutil.TimeoutExpired) as e:
+            logger.warning(f"Error handling existing process: {e}")
+    
+    # Write current PID
+    pid_file.write_text(str(os.getpid()))
+    atexit.register(lambda: pid_file.unlink(missing_ok=True))
 
 async def cleanup_resources(bot: ArtistManagerBot) -> None:
-    """Cleanup resources before shutdown."""
+    """Clean up bot resources."""
     try:
-        logger.info("Cleaning up bot resources...")
-        # Save persistence data
-        if hasattr(bot, 'persistence') and bot.persistence:
-            await bot.persistence.flush()
-        # Close any open connections
-        if hasattr(bot, 'application'):
-            await bot.application.shutdown()
+        await bot.application.stop()
+        await bot.application.shutdown()
     except Exception as e:
-        logger.error(f"Error during cleanup: {str(e)}")
-
-def signal_handler(signum, frame):
-    """Handle termination signals."""
-    logger.info(f"Received signal {signum}")
-    sys.exit(0)
-
-async def initialize_bot(bot: ArtistManagerBot) -> None:
-    """Initialize the bot with proper error handling."""
-    try:
-        logger.info("Starting bot initialization...")
-        
-        # 1. Clear existing state
-        if hasattr(bot, 'application') and bot.application:
-            logger.info("Shutting down existing application...")
-            await bot.application.shutdown()
-            bot.application.handlers.clear()
-            
-        # 2. Reset initialization flags
-        bot._initialized = False
-        logger.info("Reset initialization flags")
-        
-        # 3. Clear any existing handler instances
-        bot.onboarding = None
-        bot.core_handlers = None
-        bot.goal_handlers = None
-        bot.task_handlers = None
-        bot.project_handlers = None
-        bot.music_handlers = None
-        bot.blockchain_handlers = None
-        bot.auto_handlers = None
-        bot.team_handlers = None
-        bot.home_handlers = None
-        bot.name_change_handlers = None
-        logger.info("Cleared existing handler instances")
-        
-        # 4. Initialize components and register handlers
-        await bot._register_and_load()
-        logger.info("Completed bot initialization")
-        
-    except Exception as e:
-        logger.error(f"Error during initialization: {str(e)}")
+        logger.error(f"Error during cleanup: {e}")
         raise
 
 async def run_bot(bot: ArtistManagerBot) -> None:
-    """Run the bot with proper lifecycle management."""
+    """Run the bot."""
     try:
-        # Kill any existing bot process
-        kill_existing_bot()
+        # Initialize application
+        await bot.application.initialize()
+        await bot.application.start()
+        await bot.application.updater.start_polling()
         
-        # Write PID file
-        pid_file = write_pid_file()
-        atexit.register(cleanup_pid_file, pid_file)
-        
-        # Register signal handlers
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
-        
-        # Start polling with clean state
-        logger.info("Starting polling...")
-        await bot.application.start_polling(
-            drop_pending_updates=True,
-            allowed_updates=["message", "callback_query", "inline_query"],
-            close_loop=False
-        )
-        
+        # Keep the bot running until interrupted
+        try:
+            # Create stop signal
+            stop_signal = asyncio.Event()
+            
+            # Handle signals for graceful shutdown
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, stop_signal.set)
+            
+            logger.info("Bot is running. Press Ctrl+C to stop")
+            await stop_signal.wait()
+            
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # Remove signal handlers
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.remove_signal_handler(sig)
+    
     except Exception as e:
-        logger.error(f"Error running bot: {str(e)}")
+        logger.error(f"Error running bot: {e}")
         raise
     finally:
-        await cleanup_resources(bot)
+        try:
+            # Ensure proper cleanup
+            logger.info("Stopping bot...")
+            await bot.application.stop()
+            logger.info("Shutting down bot...")
+            await bot.application.shutdown()
+            logger.info("Bot stopped successfully")
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+            raise
 
 def main():
     """Main entry point for the bot."""
     try:
-        # Set up logging
+        # Initialize logging
         setup_logging(LOG_LEVEL, LOG_FORMAT)
-        logger.info("Starting Artist Manager Bot...")
+        
+        # Load environment variables
+        load_env_vars()
+        
+        # Check for existing instance
+        check_running_instance()
         
         # Create data directory if it doesn't exist
         data_dir = Path(DATA_DIR)
         data_dir.mkdir(parents=True, exist_ok=True)
         
-        # Initialize bot
+        logger.info("Starting Artist Manager Bot...")
+        
+        # Initialize the bot
         bot = ArtistManagerBot(BOT_TOKEN, data_dir)
         
-        # Run the bot
-        asyncio.run(run_bot(bot))
+        # Create new event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-        sys.exit(0)
+        try:
+            # Run the bot
+            loop.run_until_complete(run_bot(bot))
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user")
+        finally:
+            # Clean up the loop
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.close()
+            except Exception as e:
+                logger.error(f"Error cleaning up event loop: {e}")
+        
     except Exception as e:
-        logger.error(f"Fatal error: {str(e)}")
+        logger.error(f"Fatal error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
