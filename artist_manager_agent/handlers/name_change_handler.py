@@ -55,7 +55,11 @@ class NameChangeHandlers(BaseBotHandler):
                 CallbackQueryHandler(self.cancel, pattern="^cancel$")
             ],
             name="name_change_conversation",
-            persistent=True
+            persistent=True,
+            per_chat=True,
+            per_user=True,
+            per_message=False,
+            allow_reentry=True
         )
 
     async def start_name_change(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

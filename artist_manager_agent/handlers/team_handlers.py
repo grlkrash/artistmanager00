@@ -40,8 +40,73 @@ class TeamHandlers(BaseBotHandler):
         """Get team-related handlers."""
         return [
             CommandHandler("team", self.show_menu),
-            CallbackQueryHandler(self.handle_callback, pattern="^(menu_team|team_.*|team_menu)$")
+            CallbackQueryHandler(self.handle_callback, pattern="^(menu_team|team_.*|team_menu)$"),
+            self.get_member_conversation_handler(),
+            self.get_payment_conversation_handler()
         ]
+
+    def get_member_conversation_handler(self) -> ConversationHandler:
+        """Get the conversation handler for team member addition."""
+        return ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(self.start_member_addition, pattern="^team_add$"),
+                CommandHandler("addmember", self.start_member_addition)
+            ],
+            states={
+                AWAITING_MEMBER_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_member_name)
+                ],
+                AWAITING_MEMBER_ROLE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_member_role)
+                ],
+                AWAITING_MEMBER_EMAIL: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_member_email)
+                ],
+                AWAITING_MEMBER_RATE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_member_rate)
+                ],
+                AWAITING_MEMBER_SKILLS: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_member_skills)
+                ]
+            },
+            fallbacks=[
+                CommandHandler("cancel", self.cancel_member_addition),
+                CallbackQueryHandler(self.cancel_member_addition, pattern="^team_add_cancel$")
+            ],
+            name="team_member_addition",
+            persistent=True,
+            per_chat=True,
+            per_user=True,
+            per_message=False,
+            allow_reentry=True
+        )
+
+    def get_payment_conversation_handler(self) -> ConversationHandler:
+        """Get the conversation handler for payment requests."""
+        return ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(self._start_payment_request, pattern="^team_payment_create$"),
+                CommandHandler("payment", self._start_payment_request)
+            ],
+            states={
+                AWAITING_PAYMENT_AMOUNT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_payment_amount)
+                ],
+                AWAITING_PAYMENT_DESCRIPTION: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_payment_description)
+                ]
+            },
+            fallbacks=[
+                CommandHandler("cancel", self.cancel_payment_request),
+                CallbackQueryHandler(self.cancel_payment_request, pattern="^team_payment_cancel$")
+            ],
+            name="team_payment_request",
+            persistent=True,
+            per_chat=True,
+            per_user=True,
+            per_message=False,
+            allow_reentry=True
+        )
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle team-related callbacks."""
@@ -543,15 +608,47 @@ class TeamHandlers(BaseBotHandler):
         )
         return ConversationHandler.END
 
+    async def cancel_member_addition(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancel team member addition process."""
+        if "member_name" in context.user_data:
+            context.user_data.pop("member_name")
+        if "member_role" in context.user_data:
+            context.user_data.pop("member_role")
+        if "member_email" in context.user_data:
+            context.user_data.pop("member_email")
+        if "member_rate" in context.user_data:
+            context.user_data.pop("member_rate")
+            
+        await self._send_or_edit_message(
+            update,
+            "Team member addition cancelled. You can start over with /team",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("« Back to Team", callback_data="team_menu")
+            ]])
+        )
+        return ConversationHandler.END
+
+    async def cancel_payment_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancel payment request process."""
+        if "payment_amount" in context.user_data:
+            context.user_data.pop("payment_amount")
+        if "payment_description" in context.user_data:
+            context.user_data.pop("payment_description")
+            
+        await self._send_or_edit_message(
+            update,
+            "Payment request cancelled.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("« Back to Team", callback_data="team_menu")
+            ]])
+        )
+        return ConversationHandler.END
+
     async def handle_payment_amount(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle payment amount input."""
         try:
             amount = float(update.message.text.strip().replace("$", "").replace(",", ""))
-            
-            if not context.user_data.get('temp_payment'):
-                context.user_data['temp_payment'] = {}
-                
-            context.user_data['temp_payment']['amount'] = amount
+            context.user_data["payment_amount"] = amount
             
             await update.message.reply_text(
                 "Please provide a description for this payment:",
@@ -564,40 +661,41 @@ class TeamHandlers(BaseBotHandler):
                 "Please enter a valid amount (e.g. 1000 or 1000.50):"
             )
             return AWAITING_PAYMENT_AMOUNT
-            
+
     async def handle_payment_description(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle payment description input."""
         description = update.message.text.strip()
         
-        if not context.user_data.get('temp_payment'):
-            context.user_data['temp_payment'] = {}
-            
-        context.user_data['temp_payment']['description'] = description
-        
         # Create payment request
-        payment_data = context.user_data['temp_payment']
         payment_request = PaymentRequest(
             id=str(uuid.uuid4()),
-            amount=payment_data['amount'],
-            description=payment_data['description'],
+            amount=context.user_data["payment_amount"],
+            description=description,
             status="pending",
             created_at=datetime.now(),
             updated_at=datetime.now()
         )
         
         # Save payment request
-        self.bot.team_manager.add_payment_request(payment_request)
+        await self.bot.team_manager.add_payment_request(payment_request)
         
         # Clear temporary data
-        context.user_data.pop('temp_payment', None)
+        context.user_data.pop("payment_amount", None)
         
         # Show confirmation
+        keyboard = [
+            [
+                InlineKeyboardButton("View Payments", callback_data="team_payments"),
+                InlineKeyboardButton("New Request", callback_data="team_payment_create")
+            ],
+            [InlineKeyboardButton("« Back to Team", callback_data="team_menu")]
+        ]
+        
         await update.message.reply_text(
             f"✅ Payment request for ${payment_request.amount:,.2f} has been created.\n\n"
             f"Description: {payment_request.description}\n"
             f"Status: {payment_request.status.title()}\n\n"
-            "Use /payments to view and manage payments.",
-            parse_mode="Markdown"
+            "What would you like to do next?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        
         return ConversationHandler.END 

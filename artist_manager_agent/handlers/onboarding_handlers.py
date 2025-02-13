@@ -52,10 +52,11 @@ class OnboardingHandlers(BaseBotHandler):
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_genre)
                 ],
                 AWAITING_CAREER_STAGE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_career_stage)
+                    CallbackQueryHandler(self.handle_career_stage, pattern="^stage_")
                 ],
                 AWAITING_STREAMING_PROFILES: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_streaming_profiles)
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_streaming_profiles),
+                    CallbackQueryHandler(self.handle_streaming_callback, pattern="^platform_")
                 ]
             },
             fallbacks=[
@@ -75,24 +76,37 @@ class OnboardingHandlers(BaseBotHandler):
 
     async def start_onboarding(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Start the onboarding process."""
-            user_id = str(update.effective_user.id)
-            logger.info(f"Starting onboarding for user {user_id}")
+        user_id = str(update.effective_user.id)
+        logger.info(f"Starting onboarding for user {user_id}")
         logger.debug(f"Update type: {type(update)}")
         logger.debug(f"Update content: {update.to_dict()}")
         logger.debug(f"Context user data: {context.user_data}")
         logger.debug(f"Context bot data: {context.bot_data}")
-            
+        
         try:
             # Clear any existing state
             context.user_data.clear()
             logger.debug("Cleared user data")
+            
+            # Check if user already has a profile
+            profile = self.bot.profiles.get(user_id)
+            if profile:
+                logger.info(f"Existing profile found for user {user_id}")
+                # Show dashboard for existing users
+                keyboard = [[InlineKeyboardButton("View Dashboard", callback_data="dashboard_view")]]
+                await self._send_or_edit_message(
+                    update,
+                    f"Welcome back, {profile.name}! How can I help you today?",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                return ConversationHandler.END
             
             # Get or generate manager name
             manager_name = context.bot_data.get('manager_name', 'Avery Rhodes')
             logger.debug(f"Using manager name: {manager_name}")
             
             # If this is a button response, proceed directly to artist name input
-                if update.callback_query:
+            if update.callback_query:
                 logger.debug("Processing callback query")
                 await update.callback_query.answer()
                 if update.callback_query.data == "onboard_start":
@@ -120,8 +134,8 @@ class OnboardingHandlers(BaseBotHandler):
                 "📈 Marketing\n"
                 "👥 Team Management\n"
                 "📊 Analytics",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
             logger.debug("Welcome message sent")
             
             return ConversationHandler.END
@@ -132,95 +146,28 @@ class OnboardingHandlers(BaseBotHandler):
                 update,
                 "Sorry, something went wrong. Please try /start again.",
                 reply_markup=None
-                )
-            return ConversationHandler.END
-
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-        """Handle onboarding callbacks."""
-        query = update.callback_query
-        await query.answer()
-        
-        try:
-            if query.data == "onboard_start":
-                await self._send_or_edit_message(
-                    update,
-                    "What's your artist name?",
-                    reply_markup=None
-                )
-                return AWAITING_NAME
-                
-            elif query.data.startswith("platform_"):
-                action = query.data.replace("platform_", "")
-                
-                if action == "skip" or action == "done":
-                    return await self.finalize_onboarding(update, context)
-                    
-                elif action == "add":
-                    keyboard = [
-                        [
-                            InlineKeyboardButton("🎧 Spotify", callback_data="platform_spotify"),
-                            InlineKeyboardButton("🎵 Apple Music", callback_data="platform_apple")
-                        ],
-                        [
-                            InlineKeyboardButton("☁️ SoundCloud", callback_data="platform_soundcloud"),
-                            InlineKeyboardButton("Skip", callback_data="platform_skip")
-                        ]
-                    ]
-                    await self._send_or_edit_message(
-                        update,
-                        "Select a platform to add:",
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
-                    return AWAITING_STREAMING_PROFILES
-                    
-                else:  # Platform selected
-                    context.user_data['current_platform'] = action
-                    platform_examples = {
-                        'spotify': 'spotify.com/artist/...',
-                        'apple_music': 'music.apple.com/...',
-                        'soundcloud': 'soundcloud.com/...'
-                    }
-                    await self._send_or_edit_message(
-                        update,
-                        f"Enter your {action} profile link:\n"
-                        f"Example: {platform_examples[action]}\n\n"
-                        "Or type 'c' to skip, 'n' to choose different platform",
-                        reply_markup=None
-                    )
-                    return AWAITING_STREAMING_PROFILES
-                    
-            return ConversationHandler.END
-            
-        except Exception as e:
-            logger.error(f"Error in onboarding callback: {str(e)}")
-            await self._send_or_edit_message(
-                update,
-                "Sorry, something went wrong. Please try again.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("« Back", callback_data="core_menu")
-                ]])
             )
             return ConversationHandler.END
 
     async def handle_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle artist name input."""
-            name = update.message.text.strip()
-            context.user_data["name"] = name
-            
+        name = update.message.text.strip()
+        context.user_data["name"] = name
+        
         await self._send_or_edit_message(
             update,
             "What genre best describes your music?\n\n"
             "Examples: Pop, Rock, Hip Hop, Electronic, etc.",
             reply_markup=None
-            )
-            return AWAITING_GENRE
-            
+        )
+        return AWAITING_GENRE
+
     async def handle_genre(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle genre input."""
-            genre = update.message.text.strip()
-            context.user_data["genre"] = genre
-            
-            keyboard = [
+        genre = update.message.text.strip()
+        context.user_data["genre"] = genre
+        
+        keyboard = [
             ["Emerging", "Developing"],
             ["Established", "Professional"]
         ]
@@ -230,14 +177,14 @@ class OnboardingHandlers(BaseBotHandler):
             update,
             "What's your current career stage?",
             reply_markup=reply_markup
-            )
-            return AWAITING_CAREER_STAGE
-            
+        )
+        return AWAITING_CAREER_STAGE
+
     async def handle_career_stage(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle career stage input."""
-            stage = update.message.text.strip()
-            context.user_data["career_stage"] = stage
-            
+        stage = update.callback_query.data.split('_')[1]
+        context.user_data["career_stage"] = stage
+        
         # Create profile
         profile = ArtistProfile(
             id=str(uuid.uuid4()),
@@ -267,7 +214,71 @@ class OnboardingHandlers(BaseBotHandler):
         # Clear conversation state
         context.user_data.clear()
         
-        return ConversationHandler.END
+        return ConversationHandler.END 
+
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle onboarding-related callbacks."""
+        query = update.callback_query
+        
+        try:
+            # Answer callback query first to prevent timeout
+            await query.answer()
+            
+            action = query.data.replace("onboard_", "")
+            logger.info(f"Onboarding handler processing callback: {query.data} -> {action}")
+            
+            if action == "start":
+                # Clear any existing state
+                context.user_data.clear()
+                await self._send_or_edit_message(
+                    update,
+                    "What's your artist name?",
+                    reply_markup=None
+                )
+                return AWAITING_NAME
+            elif action == "menu":
+                await self.show_menu(update, context)
+                return ConversationHandler.END
+            else:
+                logger.warning(f"Unknown onboarding action: {action}")
+                await self.show_menu(update, context)
+                return ConversationHandler.END
+                
+        except Exception as e:
+            logger.error(f"Error in onboarding callback: {str(e)}", exc_info=True)
+            # Ensure we still answer the callback query even in case of error
+            try:
+                await query.answer()
+            except Exception:
+                pass
+            
+            await self._send_or_edit_message(
+                update,
+                "Sorry, something went wrong. Please try again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="onboard_menu")
+                ]])
+            )
+            return ConversationHandler.END
+
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the onboarding menu."""
+        keyboard = [
+            [InlineKeyboardButton("Start Onboarding", callback_data="onboard_start")],
+            [InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "🎵 *Artist Manager Bot - Onboarding*\n\n"
+            "Let's get your profile set up! This will help me:\n"
+            "• Understand your goals\n"
+            "• Track your progress\n"
+            "• Provide personalized recommendations\n"
+            "• Connect with your platforms",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        ) 
 
     async def handle_streaming_profiles(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle streaming profile input."""
@@ -344,8 +355,8 @@ class OnboardingHandlers(BaseBotHandler):
             await self._send_or_edit_message(
                 update,
                 "Sorry, I couldn't process that. Please try again or type 'c' to continue."
-        )
-        return AWAITING_STREAMING_PROFILES
+            )
+            return AWAITING_STREAMING_PROFILES
 
     def _parse_profile_link(self, text: str, platform: str) -> Optional[str]:
         """Parse a streaming profile link for a specific platform."""
@@ -361,30 +372,37 @@ class OnboardingHandlers(BaseBotHandler):
         
         return None
 
-    async def finalize_onboarding(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Finalize the onboarding process."""
-        try:
-            # Create profile
-            profile_data = {
-                'id': str(uuid.uuid4()),
-                'name': context.user_data.get('name', ''),
-                'genre': context.user_data.get('genre', ''),
-                'career_stage': context.user_data.get('career_stage', ''),
-                'streaming_profiles': context.user_data.get('streaming_profiles', {}),
-                'goals': [],
-                'strengths': [],
-                'areas_for_improvement': [],
-                'achievements': [],
-                'social_media': context.user_data.get('social_media', {}),
-                'brand_guidelines': {
-                    "description": "",
-                    "colors": [],
-                    "fonts": [],
-                    "tone": "professional"
-                }
-            }
+    async def handle_shortcut_commands(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle shortcut commands during onboarding."""
+        command = update.message.text.lower()
+        
+        # Map shortcuts to full commands
+        command_map = {
+            'c': 'continue',
+            'y': 'yes',
+            'n': 'no'
+        }
+        
+        # Convert shortcut to full command if needed
+        command = command_map.get(command, command)
+        
+        if command in ['continue', 'yes', 'skip']:
+            # Create profile with current data
+            profile = ArtistProfile(
+                id=str(uuid.uuid4()),
+                name=context.user_data.get("name", ""),
+                genre=context.user_data.get("genre", ""),
+                career_stage=context.user_data.get("career_stage", ""),
+                goals=[],
+                strengths=[],
+                areas_for_improvement=[],
+                achievements=[],
+                social_media={},
+                streaming_profiles=context.user_data.get("streaming_profiles", {}),
+                brand_guidelines={"description": "", "colors": [], "fonts": [], "tone": "professional"}
+            )
             
-            profile = ArtistProfile(**profile_data)
+            # Save profile
             self.bot.profiles[str(profile.id)] = profile
             
             # Show success message
@@ -400,45 +418,150 @@ class OnboardingHandlers(BaseBotHandler):
             
             return ConversationHandler.END
             
-        except Exception as e:
-            logger.error(f"Error finalizing onboarding: {str(e)}")
+        elif command == 'no':
+            # Go back to platform selection
+            keyboard = [
+                [
+                    InlineKeyboardButton("🎧 Spotify", callback_data="platform_spotify"),
+                    InlineKeyboardButton("🎵 Apple Music", callback_data="platform_apple")
+                ],
+                [
+                    InlineKeyboardButton("☁️ SoundCloud", callback_data="platform_soundcloud"),
+                    InlineKeyboardButton("Skip", callback_data="platform_skip")
+                ]
+            ]
             await self._send_or_edit_message(
                 update,
-                "Sorry, there was an error creating your profile. Please try again."
+                "Select a platform to add:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
-            return ConversationHandler.END
+            return AWAITING_STREAMING_PROFILES
+            
+        return AWAITING_STREAMING_PROFILES 
 
     async def cancel_onboarding(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Cancel the onboarding process."""
-        context.user_data.clear()
-        await self._send_or_edit_message(
-            update,
-            "Onboarding cancelled. Use /start to begin again."
-        )
-        return ConversationHandler.END
+        logger.info("Canceling onboarding process")
+        
+        try:
+            # Clear any existing state
+            context.user_data.clear()
+            logger.debug("Cleared user data")
+            
+            # Show cancellation message with menu option
+            keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]]
+            await self._send_or_edit_message(
+                update,
+                "Onboarding cancelled. You can start again anytime with /start",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            logger.debug("Sent cancellation message")
+            
+            return ConversationHandler.END
+            
+        except Exception as e:
+            logger.error(f"Error canceling onboarding: {str(e)}", exc_info=True)
+            await self._send_or_edit_message(
+                update,
+                "Sorry, something went wrong. Please try /start again.",
+                reply_markup=None
+            )
+            return ConversationHandler.END 
 
-    async def handle_shortcut_commands(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle shortcut commands."""
-        command = update.message.text.lower()
+    async def handle_streaming_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle streaming platform selection callbacks."""
+        query = update.callback_query
+        await query.answer()
         
-        # Map shortcuts to full commands
-        command_map = {
-            'c': 'continue',
-            'y': 'yes',
-            'n': 'no'
-        }
+        action = query.data.replace("platform_", "")
         
-        # Convert shortcut to full command if needed
-        command = command_map.get(command, command)
-        
-        if command in ['continue', 'yes', 'skip']:
-            return await self.finalize_onboarding(update, context)
-        elif command == 'no':
-            return await self.cancel_onboarding(update, context)
-        
-        return ConversationHandler.END
-
-    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Show onboarding menu."""
-        # This is not used but required by BaseBotHandler
-        pass 
+        if action == "skip":
+            # Create profile with current data
+            profile = ArtistProfile(
+                id=str(uuid.uuid4()),
+                name=context.user_data.get("name", ""),
+                genre=context.user_data.get("genre", ""),
+                career_stage=context.user_data.get("career_stage", ""),
+                goals=[],
+                strengths=[],
+                areas_for_improvement=[],
+                achievements=[],
+                social_media={},
+                streaming_profiles=context.user_data.get("streaming_profiles", {}),
+                brand_guidelines={"description": "", "colors": [], "fonts": [], "tone": "professional"}
+            )
+            
+            # Save profile
+            self.bot.profiles[str(profile.id)] = profile
+            
+            # Show success message
+            keyboard = [[InlineKeyboardButton("View Dashboard", callback_data="dashboard_view")]]
+            await self._send_or_edit_message(
+                update,
+                f"Welcome aboard, {profile.name}! Your profile has been created.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+            # Clear conversation state
+            context.user_data.clear()
+            return ConversationHandler.END
+            
+        elif action in ["spotify", "apple", "soundcloud"]:
+            context.user_data["current_platform"] = action
+            await self._send_or_edit_message(
+                update,
+                f"Please enter your {action.title()} profile link:",
+                reply_markup=None
+            )
+            return AWAITING_STREAMING_PROFILES
+            
+        elif action == "add":
+            keyboard = [
+                [
+                    InlineKeyboardButton("🎧 Spotify", callback_data="platform_spotify"),
+                    InlineKeyboardButton("🎵 Apple Music", callback_data="platform_apple")
+                ],
+                [
+                    InlineKeyboardButton("☁️ SoundCloud", callback_data="platform_soundcloud"),
+                    InlineKeyboardButton("Skip", callback_data="platform_skip")
+                ]
+            ]
+            await self._send_or_edit_message(
+                update,
+                "Select a platform to add:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_STREAMING_PROFILES
+            
+        elif action == "done":
+            # Create profile with current data
+            profile = ArtistProfile(
+                id=str(uuid.uuid4()),
+                name=context.user_data.get("name", ""),
+                genre=context.user_data.get("genre", ""),
+                career_stage=context.user_data.get("career_stage", ""),
+                goals=[],
+                strengths=[],
+                areas_for_improvement=[],
+                achievements=[],
+                social_media={},
+                streaming_profiles=context.user_data.get("streaming_profiles", {}),
+                brand_guidelines={"description": "", "colors": [], "fonts": [], "tone": "professional"}
+            )
+            
+            # Save profile
+            self.bot.profiles[str(profile.id)] = profile
+            
+            # Show success message
+            keyboard = [[InlineKeyboardButton("View Dashboard", callback_data="dashboard_view")]]
+            await self._send_or_edit_message(
+                update,
+                f"Welcome aboard, {profile.name}! Your profile has been created.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+            # Clear conversation state
+            context.user_data.clear()
+            return ConversationHandler.END
+            
+        return AWAITING_STREAMING_PROFILES 

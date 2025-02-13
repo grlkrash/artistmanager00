@@ -24,6 +24,7 @@ AWAITING_GOAL_TITLE = "AWAITING_GOAL_TITLE"
 AWAITING_GOAL_DESCRIPTION = "AWAITING_GOAL_DESCRIPTION"
 AWAITING_GOAL_PRIORITY = "AWAITING_GOAL_PRIORITY"
 AWAITING_GOAL_DATE = "AWAITING_GOAL_DATE"
+AWAITING_GOAL_DUE_DATE = "AWAITING_GOAL_DUE_DATE"
 
 class GoalHandlers(BaseBotHandler):
     """Handlers for goal-related functionality."""
@@ -335,30 +336,32 @@ class GoalHandlers(BaseBotHandler):
         """Get the conversation handler for goal creation."""
         return ConversationHandler(
             entry_points=[
-                CallbackQueryHandler(self.start_goal_creation, pattern="^goal_create$")
+                CallbackQueryHandler(self.start_goal_creation, pattern="^goal_create$"),
+                CommandHandler("newgoal", self.start_goal_creation)
             ],
             states={
                 AWAITING_GOAL_TITLE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_goal_title)
                 ],
+                AWAITING_GOAL_PRIORITY: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_goal_priority)
+                ],
                 AWAITING_GOAL_DESCRIPTION: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_goal_description)
                 ],
-                AWAITING_GOAL_PRIORITY: [
-                    CallbackQueryHandler(self.handle_goal_priority, pattern="^goal_priority_")
-                ],
-                AWAITING_GOAL_DATE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_goal_date)
+                AWAITING_GOAL_DUE_DATE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_goal_due_date)
                 ]
             },
             fallbacks=[
-                CommandHandler("cancel", self.cancel_goal_creation)
+                CommandHandler("cancel", self.cancel_goal_creation),
+                CallbackQueryHandler(self.cancel_goal_creation, pattern="^goal_cancel$")
             ],
             name="goal_creation",
             persistent=True,
-            per_message=True,
-            per_chat=False,
+            per_chat=True,
             per_user=True,
+            per_message=False,
             allow_reentry=True
         )
 

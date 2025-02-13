@@ -62,13 +62,14 @@ class TaskHandlers(BaseBotHandler):
                 ]
             },
             fallbacks=[
-                CommandHandler("cancel", self.cancel_task_creation)
+                CommandHandler("cancel", self.cancel_task_creation),
+                CallbackQueryHandler(self.cancel_task_creation, pattern="^task_cancel$")
             ],
             name="task_creation",
             persistent=True,
-            per_message=True,
-            per_chat=False,
+            per_chat=True,
             per_user=True,
+            per_message=False,
             allow_reentry=True
         )
 

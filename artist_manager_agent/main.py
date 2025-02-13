@@ -16,6 +16,7 @@ from telegram.ext import (
     PicklePersistence
 )
 
+from .bot_base import BaseBot
 from .bot_main import ArtistManagerBot
 from .utils.logger import get_logger, setup_logging
 from .utils.config import (
@@ -52,8 +53,9 @@ def check_running_instance():
 async def cleanup_resources(bot: ArtistManagerBot) -> None:
     """Clean up bot resources."""
     try:
-        await bot.application.stop()
-        await bot.application.shutdown()
+        if bot and hasattr(bot, 'application'):
+            await bot.application.stop()
+            await bot.application.shutdown()
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
         raise
@@ -62,50 +64,82 @@ async def run_bot(bot: ArtistManagerBot) -> None:
     """Run the bot."""
     try:
         # Initialize application
-        await bot.application.initialize()
-        await bot.application.start()
-        await bot.application.updater.start_polling()
+        await bot.start()
         
-        # Keep the bot running until interrupted
-        try:
-            # Create stop signal
-            stop_signal = asyncio.Event()
-            
-            # Handle signals for graceful shutdown
+        # Create stop event and signal handler
+        stop_signal = asyncio.Event()
+        shutdown_tasks = set()
+        
+        def signal_handler():
+            """Handle shutdown signals in a thread-safe way."""
             loop = asyncio.get_running_loop()
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.add_signal_handler(sig, stop_signal.set)
             
-            logger.info("Bot is running. Press Ctrl+C to stop")
-            await stop_signal.wait()
+            async def shutdown():
+                try:
+                    # Stop accepting new updates
+                    if bot.application and bot.application.updater:
+                        await bot.application.updater.stop()
+                    
+                    # Cancel all tasks
+                    await bot.cancel_tasks()
+                    
+                    # Stop the bot
+                    await bot.stop()
+                    
+                    # Set stop signal
+                    stop_signal.set()
+                except Exception as e:
+                    logger.error(f"Error during shutdown: {e}")
             
-        except asyncio.CancelledError:
-            pass
-        finally:
-            # Remove signal handlers
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.remove_signal_handler(sig)
-    
+            # Ensure signal handling is thread-safe
+            task = loop.create_task(shutdown())
+            shutdown_tasks.add(task)
+            task.add_done_callback(shutdown_tasks.discard)
+        
+        # Handle signals for graceful shutdown
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, signal_handler)
+        
+        logger.info("Bot is running. Press Ctrl+C to stop")
+        
+        # Wait for stop signal
+        await stop_signal.wait()
+        
+        # Wait for any pending shutdown tasks
+        if shutdown_tasks:
+            try:
+                await asyncio.wait(shutdown_tasks, timeout=5.0)
+            except Exception as e:
+                logger.error(f"Error waiting for shutdown tasks: {e}")
+        
     except Exception as e:
         logger.error(f"Error running bot: {e}")
         raise
     finally:
+        # Ensure cleanup
         try:
-            # Ensure proper cleanup
-            logger.info("Stopping bot...")
-            await bot.application.stop()
-            logger.info("Shutting down bot...")
-            await bot.application.shutdown()
-            logger.info("Bot stopped successfully")
+            # Remove signal handlers
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.remove_signal_handler(sig)
+                except Exception:
+                    pass
+            
+            # Final stop attempt
+            if bot:
+                await bot.stop()
+            
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
-            raise
+            logger.error(f"Error during final cleanup: {e}")
 
 def main():
     """Main entry point for the bot."""
     try:
-        # Initialize logging
+        # Initialize logging first
         setup_logging(LOG_LEVEL, LOG_FORMAT)
+        logger.info("Starting Artist Manager Bot...")
         
         # Load environment variables
         load_env_vars()
@@ -117,27 +151,47 @@ def main():
         data_dir = Path(DATA_DIR)
         data_dir.mkdir(parents=True, exist_ok=True)
         
-        logger.info("Starting Artist Manager Bot...")
-        
-        # Initialize the bot
-        bot = ArtistManagerBot(BOT_TOKEN, data_dir)
-        
-        # Create new event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
+        # Create and set main event loop
         try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Set the loop for BaseBot before creating any instances
+        try:
+            BaseBot.set_main_loop(loop)
+        except RuntimeError as e:
+            logger.warning(f"Event loop already initialized: {e}")
+        
+        bot = None
+        try:
+            # Initialize the bot after loop is set
+            bot = ArtistManagerBot(BOT_TOKEN, data_dir)
+            
             # Run the bot
             loop.run_until_complete(run_bot(bot))
         except KeyboardInterrupt:
             logger.info("Bot stopped by user")
+            if bot:
+                loop.run_until_complete(bot.stop())
+        except Exception as e:
+            logger.error(f"Error running bot: {e}")
+            if bot:
+                loop.run_until_complete(bot.stop())
+            raise
         finally:
-            # Clean up the loop
             try:
-                loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.close()
+                # Clean up the event loop
+                if bot:
+                    loop.run_until_complete(BaseBot.cleanup_loop())
             except Exception as e:
-                logger.error(f"Error cleaning up event loop: {e}")
+                logger.error(f"Error during final cleanup: {e}")
+            finally:
+                # Always close the loop
+                if loop and not loop.is_closed():
+                    loop.close()
+                asyncio.set_event_loop(None)
         
     except Exception as e:
         logger.error(f"Fatal error: {e}")

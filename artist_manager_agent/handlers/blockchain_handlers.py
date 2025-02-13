@@ -64,8 +64,42 @@ class BlockchainHandlers(BaseBotHandler):
         """Get blockchain-related handlers."""
         return [
             CommandHandler("blockchain", self.show_menu),
-            CallbackQueryHandler(self.handle_callback, pattern="^(menu_blockchain|blockchain_.*|blockchain_menu)$")
+            CallbackQueryHandler(self.handle_callback, pattern="^(menu_blockchain|blockchain_.*|blockchain_menu)$"),
+            self.get_swap_conversation_handler()
         ]
+
+    def get_swap_conversation_handler(self) -> ConversationHandler:
+        """Get the conversation handler for token swaps."""
+        return ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(self.swap_tokens, pattern="^swap_start$"),
+                CommandHandler("swap", self.swap_tokens)
+            ],
+            states={
+                AWAITING_SWAP_FROM_TOKEN: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_swap_from_token)
+                ],
+                AWAITING_SWAP_TO_TOKEN: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_swap_to_token)
+                ],
+                AWAITING_SWAP_AMOUNT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_swap_amount)
+                ],
+                AWAITING_SWAP_ROUTE: [
+                    CallbackQueryHandler(self.handle_swap_route, pattern="^route_")
+                ]
+            },
+            fallbacks=[
+                CommandHandler("cancel", self.cancel_swap),
+                CallbackQueryHandler(self.cancel_swap, pattern="^swap_cancel$")
+            ],
+            name="token_swap",
+            persistent=True,
+            per_chat=True,
+            per_user=True,
+            per_message=False,
+            allow_reentry=True
+        )
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle blockchain-related callbacks."""

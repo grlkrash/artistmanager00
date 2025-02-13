@@ -46,8 +46,39 @@ class AutoHandlers(BaseBotHandler):
         """Get auto mode-related handlers."""
         return [
             CommandHandler("auto", self.show_menu),
-            CallbackQueryHandler(self.handle_callback, pattern="^(menu_auto|auto_.*|auto_menu)$")
+            CallbackQueryHandler(self.handle_callback, pattern="^(menu_auto|auto_.*|auto_menu)$"),
+            self.get_settings_conversation_handler()
         ]
+
+    def get_settings_conversation_handler(self) -> ConversationHandler:
+        """Get the conversation handler for auto mode settings."""
+        return ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(self._show_configure_options, pattern="^auto_config_.*$"),
+                CommandHandler("autosetup", self._show_configure_options)
+            ],
+            states={
+                AWAITING_FREQUENCY: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_frequency)
+                ],
+                AWAITING_AI_LEVEL: [
+                    CallbackQueryHandler(self.handle_ai_level, pattern="^auto_ai_")
+                ],
+                AWAITING_NOTIFICATIONS: [
+                    CallbackQueryHandler(self.handle_notifications, pattern="^auto_notif_")
+                ]
+            },
+            fallbacks=[
+                CommandHandler("cancel", self.cancel_auto_setup),
+                CallbackQueryHandler(self.cancel_auto_setup, pattern="^auto_config_cancel$")
+            ],
+            name="auto_mode_settings",
+            persistent=True,
+            per_chat=True,
+            per_user=True,
+            per_message=False,
+            allow_reentry=True
+        )
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle auto mode-related callbacks."""
