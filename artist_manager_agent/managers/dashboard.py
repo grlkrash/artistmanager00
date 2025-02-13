@@ -1,11 +1,13 @@
-"""Dashboard management for the Artist Manager Bot."""
+"""Dashboard functionality for the Artist Manager Bot."""
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+import logging
+from ..models import ArtistProfile
+from ..utils.logger import get_logger
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.ext import ContextTypes
-import logging
-from typing import List
-from .models import ArtistProfile
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class Dashboard:
     """Manages command organization and state."""

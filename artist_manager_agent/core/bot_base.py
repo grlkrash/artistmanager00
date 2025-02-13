@@ -45,7 +45,6 @@ from ..handlers.features import (
     TeamHandlers,
     AutoHandlers
 )
-from ..handlers.features.bot_goals import GoalsMixin
 from ..persistence import RobustPersistence
 from ..managers.dashboard import Dashboard
 from ..managers.team_manager import TeamManager
@@ -58,7 +57,7 @@ from ..handlers.features.home_handler import HomeHandlers
 from ..handlers.features.name_change_handler import NameChangeHandlers
 from ..utils.config import (
     BOT_TOKEN,
-    DB_URL,
+    DATA_DIR,
     PERSISTENCE_PATH,
     LOG_LEVEL,
     DEFAULT_MODEL,
@@ -77,6 +76,8 @@ import shutil
 import pickle
 from pathlib import Path
 import threading
+import signal
+import atexit
 
 class BaseBot:
     """Base class for the Artist Manager bot."""
@@ -144,7 +145,7 @@ class BaseBot:
                 return
                 
             try:
-                self.db_url = db_url or DB_URL
+                self.db_url = db_url or DATA_DIR
                 self.agent = None
                 self.logger = logging.getLogger(__name__)
                 self.logger.setLevel(LOG_LEVEL)
