@@ -1,7 +1,7 @@
 """Goal management handlers for the Artist Manager Bot."""
 from datetime import datetime
 import uuid
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message, ForceReply
 from telegram.ext import (
     ConversationHandler,
@@ -9,7 +9,8 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
-    filters
+    filters,
+    BaseHandler
 )
 from ...models import Goal
 from ..core.base_handler import BaseBotHandler
@@ -28,6 +29,101 @@ class GoalHandlers(BaseBotHandler):
     
     def __init__(self, bot):
         super().__init__(bot)
+        self.conversation_handler = self.get_conversation_handler()
+
+    def get_handlers(self) -> List[BaseHandler]:
+        """Get all handlers for this module."""
+        return [
+            self.conversation_handler,
+            CommandHandler("goals", self.show_menu),
+            CallbackQueryHandler(self.handle_callback, pattern="^goal_")
+        ]
+
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle callback queries."""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data == "goal_create":
+            await self.start_goal_creation(query.message, context)
+        elif query.data.startswith("goal_view_"):
+            goal_id = query.data.replace("goal_view_", "")
+            await self.view_goal(goal_id, update, context)
+        elif query.data.startswith("goal_add_task_"):
+            goal_id = query.data.replace("goal_add_task_", "")
+            await self.add_task_to_goal(goal_id, update, context)
+        elif query.data == "goals":
+            await self.show_menu(update, context)
+
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the main menu for goals."""
+        keyboard = [
+            [InlineKeyboardButton("➕ Create New Goal", callback_data="goal_create")],
+            [InlineKeyboardButton("📊 View Goals", callback_data="goals_list")],
+            [InlineKeyboardButton("📈 Goal Analytics", callback_data="goals_analytics")],
+            [InlineKeyboardButton("« Back to Main Menu", callback_data="main_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "🎯 *Goals Management*\n\n"
+            "What would you like to do?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    async def view_goal(self, goal_id: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """View a specific goal."""
+        try:
+            goal = await self.bot.task_manager_integration.get_goal(goal_id)
+            if not goal:
+                await self._handle_error(update, "Goal not found.")
+                return
+                
+            keyboard = [
+                [
+                    InlineKeyboardButton("✏️ Edit", callback_data=f"goal_edit_{goal_id}"),
+                    InlineKeyboardButton("🗑️ Delete", callback_data=f"goal_delete_{goal_id}")
+                ],
+                [
+                    InlineKeyboardButton("➕ Add Task", callback_data=f"goal_add_task_{goal_id}"),
+                    InlineKeyboardButton("📊 Progress", callback_data=f"goal_progress_{goal_id}")
+                ],
+                [InlineKeyboardButton("« Back to Goals", callback_data="goals")]
+            ]
+            
+            await self._send_or_edit_message(
+                update,
+                f"*Goal Details*\n\n"
+                f"Title: {goal.title}\n"
+                f"Description: {goal.description}\n"
+                f"Priority: {goal.priority}\n"
+                f"Status: {goal.status}\n"
+                f"Progress: {goal.progress}%\n"
+                f"Target Date: {goal.target_date.strftime('%Y-%m-%d') if goal.target_date else 'Not set'}",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error viewing goal: {str(e)}")
+            await self._handle_error(update)
+
+    async def add_task_to_goal(self, goal_id: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Add a task to a goal."""
+        try:
+            # Store goal_id in context for task creation
+            context.user_data["creating_task_for_goal"] = goal_id
+            
+            # Redirect to task creation
+            if hasattr(self.bot.tasks, "start_task_creation"):
+                await self.bot.tasks.start_task_creation(update.effective_message, context)
+            else:
+                await self._handle_error(update, "Task creation is not available.")
+                
+        except Exception as e:
+            logger.error(f"Error adding task to goal: {str(e)}")
+            await self._handle_error(update)
 
     async def start_goal_creation(self, message: Message, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Start the goal creation process."""

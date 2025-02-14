@@ -5,7 +5,6 @@ setup.py
 artist_manager_agent/__init__.py
 artist_manager_agent/__main__.py
 artist_manager_agent/main.py
-artist_manager_agent/persistence.py
 artist_manager_agent.egg-info/PKG-INFO
 artist_manager_agent.egg-info/SOURCES.txt
 artist_manager_agent.egg-info/dependency_links.txt
@@ -16,10 +15,7 @@ artist_manager_agent.egg-info/top_level.txt
 artist_manager_agent/core/__init__.py
 artist_manager_agent/core/agent.py
 artist_manager_agent/core/bot.py
-artist_manager_agent/core/bot_base.py
-artist_manager_agent/core/bot_main.py
 artist_manager_agent/handlers/__init__.py
-artist_manager_agent/handlers/core_handlers.py
 artist_manager_agent/handlers/core/__init__.py
 artist_manager_agent/handlers/core/base_handler.py
 artist_manager_agent/handlers/core/core_handlers.py

@@ -12,12 +12,10 @@ from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    filters,
-    PicklePersistence
+    filters
 )
 
-from .bot_base import BaseBot
-from .bot_main import ArtistManagerBot
+from .core import Bot
 from .utils.logger import get_logger, setup_logging
 from .utils.config import (
     BOT_TOKEN,
@@ -50,7 +48,7 @@ def check_running_instance():
     pid_file.write_text(str(os.getpid()))
     atexit.register(lambda: pid_file.unlink(missing_ok=True))
 
-async def cleanup_resources(bot: ArtistManagerBot) -> None:
+async def cleanup_resources(bot: Bot) -> None:
     """Clean up bot resources."""
     if not bot:
         return
@@ -89,7 +87,7 @@ async def cleanup_resources(bot: ArtistManagerBot) -> None:
         logger.error(f"Error during cleanup: {e}")
         raise
 
-async def run_bot(bot: ArtistManagerBot) -> None:
+async def run_bot(bot: Bot) -> None:
     """Run the bot."""
     stop_signal = asyncio.Event()
     shutdown_tasks = set()
@@ -175,65 +173,85 @@ async def run_bot(bot: ArtistManagerBot) -> None:
         except Exception as e:
             logger.error(f"Error during final cleanup: {e}")
 
-def main():
-    """Main entry point for the bot."""
+async def main_async():
+    """Async main function."""
     try:
-        # Initialize logging first
-        setup_logging(LOG_LEVEL, LOG_FORMAT)
-        logger.info("Starting Artist Manager Bot...")
+        # Setup logging
+        setup_logging(level=LOG_LEVEL, format_str=LOG_FORMAT)
         
         # Load environment variables
         load_env_vars()
         
-        # Check for existing instance
+        # Check for running instance
         check_running_instance()
         
-        # Create data directory if it doesn't exist
+        # Initialize bot
         data_dir = Path(DATA_DIR)
         data_dir.mkdir(parents=True, exist_ok=True)
         
-        # Initialize bot and run it
-        bot = None
-        loop = None
+        bot = Bot(token=BOT_TOKEN, data_dir=data_dir)
+        await bot.start()
+        
+        # Create stop event
+        stop_event = asyncio.Event()
+        
+        # Handle shutdown signals
+        def signal_handler(sig):
+            logger.info(f"Received signal {sig}, initiating shutdown...")
+            stop_event.set()
+            
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda s=sig: signal_handler(s))
+        
+        logger.info("Bot is running. Press Ctrl+C to stop.")
+        
+        # Keep the bot running until stop event is set
         try:
-            # Create bot instance (this will create/get the event loop)
-            bot = ArtistManagerBot(BOT_TOKEN, data_dir)
-            
-            # Get the loop that was initialized by the bot
-            loop = asyncio.get_event_loop()
-            
-            # Run the bot
-            loop.run_until_complete(run_bot(bot))
-            
-        except KeyboardInterrupt:
-            logger.info("Bot stopped by user")
-            if bot and loop:
-                loop.run_until_complete(cleanup_resources(bot))
-        except Exception as e:
-            logger.error(f"Error running bot: {e}")
-            if bot and loop:
-                loop.run_until_complete(cleanup_resources(bot))
-            raise
+            await stop_event.wait()
         finally:
-            try:
-                # Clean up resources
-                if bot and loop:
-                    loop.run_until_complete(cleanup_resources(bot))
-                    loop.run_until_complete(bot.cleanup_loop())
-                
-                # Close the loop
-                if loop and not loop.is_closed():
-                    loop.close()
-                    
-                # Reset the event loop policy
-                asyncio.set_event_loop(None)
-                
-            except Exception as e:
-                logger.error(f"Error during final cleanup: {e}")
-                
+            logger.info("Stopping bot...")
+            await bot.stop()
+            
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
+
+def init_persistence():
+    """Initialize persistence directory and file."""
+    data_dir = Path(DATA_DIR)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    
+    persistence_path = Path(PERSISTENCE_PATH)
+    if not persistence_path.exists():
+        # Create initial empty persistence data
+        initial_data = {
+            "user_data": {},
+            "chat_data": {},
+            "bot_data": {},
+            "callback_data": None,
+            "conversations": {}
+        }
+        persistence_path.write_text(str(initial_data))
+    return persistence_path
+
+def main():
+    """Main entry point for the bot."""
+    # Load environment variables
+    load_env_vars()
+    
+    # Setup logging
+    setup_logging(level=LOG_LEVEL, fmt=LOG_FORMAT)
+    
+    # Check for running instance
+    check_running_instance()
+    
+    # Initialize persistence
+    data_dir = init_persistence()
+    
+    # Initialize and run bot
+    bot = Bot(token=BOT_TOKEN, data_dir=data_dir.parent)
+    bot.run()
 
 if __name__ == "__main__":
     main() 

@@ -1,10 +1,8 @@
 """Core bot functionality."""
-from .bot_base import BaseBot
-from .bot_main import ArtistManagerBot
+from .agent import ArtistManagerAgent
 from .bot import Bot
 
 __all__ = [
-    "BaseBot",
-    "ArtistManagerBot",
+    "ArtistManagerAgent",
     "Bot"
 ] 

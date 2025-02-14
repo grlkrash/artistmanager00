@@ -1,15 +1,16 @@
 """Task management handlers for the Artist Manager Bot."""
 from datetime import datetime
 import uuid
-from typing import Dict, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message, ForceReply
+from typing import Dict, Optional, List
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message, ForceReply, ReplyKeyboardMarkup
 from telegram.ext import (
     ConversationHandler,
     ContextTypes,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
-    filters
+    filters,
+    BaseHandler
 )
 from ...models import Task
 from ..core.base_handler import BaseBotHandler
@@ -27,17 +28,26 @@ class TaskHandlers(BaseBotHandler):
     """Task management handlers."""
     
     def __init__(self, bot):
-        self.bot = bot
+        super().__init__(bot)
+        self.conversation_handler = self.get_conversation_handler()
 
-    async def handle_task_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle task-related callbacks."""
+    def get_handlers(self) -> List[BaseHandler]:
+        """Get all handlers for this module."""
+        return [
+            self.conversation_handler,
+            CommandHandler("tasks", self.show_menu),
+            CallbackQueryHandler(self.handle_callback, pattern="^task_")
+        ]
+
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle callback queries."""
         query = update.callback_query
         await query.answer()
         
         action = query.data.replace("task_", "")
         
         if action == "create":
-            return await self.start_task_creation(query.message, context)
+            await self.start_task_creation(query.message, context)
         elif action == "complete":
             await self.show_task_completion_options(query.message, context)
         elif action == "view":
@@ -53,6 +63,70 @@ class TaskHandlers(BaseBotHandler):
         elif action.startswith("edit_"):
             task_id = action.replace("edit_", "")
             await self.edit_task(query.message, context, task_id)
+        elif action == "menu":
+            await self.show_menu(update, context)
+
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the main menu for tasks."""
+        keyboard = [
+            [InlineKeyboardButton("➕ Create Task", callback_data="task_create")],
+            [
+                InlineKeyboardButton("📋 View Tasks", callback_data="task_view"),
+                InlineKeyboardButton("✅ Complete Tasks", callback_data="task_complete")
+            ],
+            [InlineKeyboardButton("« Back to Main Menu", callback_data="main_menu")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "📝 *Task Management*\n\n"
+            "What would you like to do?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    def get_conversation_handler(self) -> ConversationHandler:
+        """Get the conversation handler for task creation."""
+        return ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(self.start_task_creation, pattern="^task_create$"),
+                CommandHandler("task", self.start_task_creation)
+            ],
+            states={
+                AWAITING_TASK_TITLE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_task_title)
+                ],
+                AWAITING_TASK_DESCRIPTION: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_task_description)
+                ],
+                AWAITING_TASK_PRIORITY: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_task_priority)
+                ],
+                AWAITING_TASK_DUE_DATE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_task_due_date)
+                ]
+            },
+            fallbacks=[
+                CommandHandler("cancel", self.cancel_task_creation),
+                CallbackQueryHandler(self.cancel_task_creation, pattern="^task_cancel$")
+            ],
+            name="task_creation",
+            persistent=True
+        )
+
+    async def cancel_task_creation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancel task creation process."""
+        if "creating_task" in context.user_data:
+            del context.user_data["creating_task"]
+            
+        await self._send_or_edit_message(
+            update,
+            "Task creation cancelled. Use /tasks to manage your tasks.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("« Back to Tasks", callback_data="task_menu")
+            ]])
+        )
+        return ConversationHandler.END
 
     async def start_task_creation(self, message: Message, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Start the task creation process."""

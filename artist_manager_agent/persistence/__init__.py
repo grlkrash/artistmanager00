@@ -22,32 +22,20 @@ class RobustPersistence(BasePersistence):
     def __init__(
         self, 
         filepath: str,
-        store_data: Optional[Dict[str, bool]] = None,
         update_interval: int = 60,
         backup_count: int = 3
     ):
-        # Initialize storage settings
-        store_data = store_data or {
-            "user_data": True,
-            "chat_data": True,
-            "bot_data": True,
-            "callback_data": True
-        }
-        
-        # Initialize base class with storage flags
+        # Initialize base class with default settings
         super().__init__(
-            store_user_data=store_data.get("user_data", True),
-            store_chat_data=store_data.get("chat_data", True),
-            store_bot_data=store_data.get("bot_data", True),
-            store_callback_data=store_data.get("callback_data", True),
+            store_data=None,  # Let PTB handle defaults
             update_interval=update_interval
         )
         
-        # Set storage flags
-        self._store_user_data = store_data.get("user_data", True)
-        self._store_chat_data = store_data.get("chat_data", True)
-        self._store_bot_data = store_data.get("bot_data", True)
-        self._store_callback_data = store_data.get("callback_data", True)
+        # Initialize storage flags
+        self._store_user_data = True
+        self._store_chat_data = True
+        self._store_bot_data = True
+        self._store_callback_data = True
         
         self.filepath = Path(filepath)
         self.backup_count = backup_count
@@ -55,11 +43,11 @@ class RobustPersistence(BasePersistence):
         self.backup_dir.mkdir(exist_ok=True)
         
         # Initialize data containers
-        self._user_data: Dict[int, Dict[str, Any]] = {}
-        self._chat_data: Dict[int, Dict[str, Any]] = {}
-        self._bot_data: Dict[str, Any] = {}
-        self._callback_data: Dict[str, Any] = {}
-        self._conversations: ConversationDict = {}
+        self._user_data = defaultdict(dict)
+        self._chat_data = defaultdict(dict)
+        self._bot_data = {}
+        self._callback_data = None
+        self._conversations = {}
         
         # Initialize state tracking
         self._update_task = None

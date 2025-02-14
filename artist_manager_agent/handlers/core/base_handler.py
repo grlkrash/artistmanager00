@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
 from telegram.ext import BaseHandler, ContextTypes
-from ...utils.logger import get_logger
+from artist_manager_agent.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

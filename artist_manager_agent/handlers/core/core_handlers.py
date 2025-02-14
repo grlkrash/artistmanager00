@@ -3,7 +3,7 @@ from typing import List
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, error
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters, BaseHandler
 from .base_handler import BaseBotHandler
-from ...utils.logger import get_logger
+from artist_manager_agent.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
