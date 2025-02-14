@@ -93,8 +93,15 @@ class OnboardingHandlers(BaseBotHandler):
 
     def _load_name_data(self):
         """Load name components for generating manager names."""
-        self.first_names = ["Alex", "Jordan", "Morgan", "Taylor", "Casey", "Sam", "Jamie"]
-        self.last_names = ["Wright", "Reed", "Rivers", "Brooks", "Hayes", "Morgan", "Blake"]
+        self.first_names = ["Alex", "Jordan", "Morgan", "Taylor", "Casey", "Sam", "Jamie", "Avery", "Riley", "Quinn"]
+        self.last_names = ["Wright", "Reed", "Rivers", "Brooks", "Hayes", "Morgan", "Blake", "Rhodes", "Silva", "Chen"]
+        
+        # Generate random manager name if not already set
+        if 'manager_name' not in self.bot.application.bot_data:
+            import random
+            first_name = random.choice(self.first_names)
+            last_name = random.choice(self.last_names)
+            self.bot.application.bot_data['manager_name'] = f"{first_name} {last_name}"
 
     def get_handlers(self) -> List[BaseHandler]:
         """Get onboarding-related handlers."""
@@ -687,13 +694,19 @@ class OnboardingHandlers(BaseBotHandler):
         command = command_map.get(command, command)
         
         if command in ['continue', 'yes', 'skip']:
+            # Format goals as strings
+            goals = []
+            for goal in context.user_data.get("goals", []):
+                timeframe = f"{goal['timeframe']} months" if goal['timeframe'] else "No timeframe"
+                goals.append(f"{goal['title']} ({timeframe})")
+            
             # Create profile with current data
             profile = ArtistProfile(
                 id=str(uuid.uuid4()),
                 name=context.user_data.get("name", ""),
                 genre=context.user_data.get("genre", ""),
                 career_stage=context.user_data.get("career_stage", ""),
-                goals=context.user_data.get("goals", []),
+                goals=goals,  # Now using formatted goal strings
                 strengths=[],
                 areas_for_improvement=[],
                 achievements=[],
@@ -755,89 +768,56 @@ class OnboardingHandlers(BaseBotHandler):
         
         action = query.data.replace("platform_", "")
         
-        if action == "skip":
-            # Create profile with all collected data
-            profile = ArtistProfile(
-                id=str(uuid.uuid4()),
-                name=context.user_data["name"],
-                genre=context.user_data["genre"],
-                career_stage=context.user_data["career_stage"],
-                goals=context.user_data.get("goals", []),
-                strengths=[],
-                areas_for_improvement=[],
-                achievements=[],
-                social_media={},
-                streaming_profiles=context.user_data.get("streaming_profiles", {}),
-                brand_guidelines={"description": "", "colors": [], "fonts": [], "tone": "professional"}
-            )
-            
-            # Save profile
-            user_id = str(update.effective_user.id)
-            self.bot.profiles[user_id] = profile
-            logger.info(f"Created and saved profile for user {user_id}")
-            
-            # Create initial tasks based on goals
-            tasks = []
-            for goal in profile.goals:
-                # Create a task for each goal
-                task = {
-                    "title": f"Plan: {goal['title']}",
-                    "description": f"Create action plan for goal: {goal['title']}",
-                    "priority": "high",
-                    "due_date": None,  # Will be set based on goal timeframe
-                    "status": "pending"
-                }
-                tasks.append(task)
+        if action == "skip" or action == "done":
+            try:
+                # Format goals as strings
+                goals = []
+                for goal in context.user_data.get("goals", []):
+                    timeframe = f"{goal['timeframe']} months" if goal['timeframe'] else "No timeframe"
+                    goals.append(f"{goal['title']} ({timeframe})")
                 
-                # Add goal-specific quick tasks
-                if "single" in goal['title'].lower():
-                    tasks.append({
-                        "title": "Create release timeline",
-                        "description": "Plan key dates for your release",
-                        "priority": "high",
-                        "status": "pending"
-                    })
-                elif "social media" in goal['title'].lower():
-                    tasks.append({
-                        "title": "Set up content calendar",
-                        "description": "Plan your social media content",
-                        "priority": "medium",
-                        "status": "pending"
-                    })
-            
-            # Save tasks
-            context.user_data["initial_tasks"] = tasks
-            
-            # Show welcome dashboard with immediate actions
-            message = (
-                f"🎉 Welcome aboard, {profile.name}!\n\n"
-                "I've created your profile and set up some initial tasks based on your goals.\n\n"
-                "Here's what you can do next:\n"
-                "1. Review your action plan\n"
-                "2. Set up your first tasks\n"
-                "3. Explore the dashboard\n\n"
-                "What would you like to do first?"
-            )
-            
-            keyboard = [
-                [
-                    InlineKeyboardButton("📋 View Tasks", callback_data="tasks_view"),
-                    InlineKeyboardButton("🎯 View Goals", callback_data="goals_view")
-                ],
-                [
-                    InlineKeyboardButton("📊 View Dashboard", callback_data="dashboard_view")
-                ]
-            ]
-            
-            await self._send_or_edit_message(
-                update,
-                message,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            
-            # Clear conversation state
-            context.user_data.clear()
-            return ConversationHandler.END
+                # Create profile with current data
+                profile = ArtistProfile(
+                    id=str(uuid.uuid4()),
+                    name=context.user_data.get("name", ""),
+                    genre=context.user_data.get("genre", ""),
+                    career_stage=context.user_data.get("career_stage", ""),
+                    goals=goals,  # Now using formatted goal strings
+                    strengths=[],
+                    areas_for_improvement=[],
+                    achievements=[],
+                    social_media=context.user_data.get("social_media", {}),
+                    streaming_profiles=context.user_data.get("streaming_profiles", {}),
+                    brand_guidelines={"description": "", "colors": [], "fonts": [], "tone": "professional"}
+                )
+                
+                # Save profile
+                user_id = str(update.effective_user.id)
+                self.bot.profiles[user_id] = profile
+                logger.info(f"Created and saved profile for user {user_id}")
+                
+                # Show success message
+                keyboard = [[InlineKeyboardButton("View Dashboard", callback_data="dashboard_view")]]
+                await self._send_or_edit_message(
+                    update,
+                    f"Welcome aboard, {profile.name}! Your profile has been created.",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                
+                # Clear conversation state
+                context.user_data.clear()
+                return ConversationHandler.END
+                
+            except Exception as e:
+                logger.error(f"Error creating profile: {str(e)}", exc_info=True)
+                await self._send_or_edit_message(
+                    update,
+                    "Sorry, there was an error creating your profile. Please try again.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("« Back", callback_data="onboard_menu")
+                    ]])
+                )
+                return ConversationHandler.END
             
         elif action in ["spotify", "apple", "soundcloud"]:
             context.user_data["current_platform"] = action
@@ -865,37 +845,6 @@ class OnboardingHandlers(BaseBotHandler):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return AWAITING_STREAMING_PROFILES
-            
-        elif action == "done":
-            # Create profile with current data
-            profile = ArtistProfile(
-                id=str(uuid.uuid4()),
-                name=context.user_data.get("name", ""),
-                genre=context.user_data.get("genre", ""),
-                career_stage=context.user_data.get("career_stage", ""),
-                goals=context.user_data.get("goals", []),
-                strengths=[],
-                areas_for_improvement=[],
-                achievements=[],
-                social_media={},
-                streaming_profiles=context.user_data.get("streaming_profiles", {}),
-                brand_guidelines={"description": "", "colors": [], "fonts": [], "tone": "professional"}
-            )
-            
-            # Save profile
-            self.bot.profiles[str(profile.id)] = profile
-            
-            # Show success message
-            keyboard = [[InlineKeyboardButton("View Dashboard", callback_data="dashboard_view")]]
-            await self._send_or_edit_message(
-                update,
-                f"Welcome aboard, {profile.name}! Your profile has been created.",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            
-            # Clear conversation state
-            context.user_data.clear()
-            return ConversationHandler.END
             
         return AWAITING_STREAMING_PROFILES 
 

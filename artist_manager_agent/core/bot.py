@@ -51,7 +51,7 @@ class Bot:
     _initialized_loop = False
     _task_groups: Dict[str, Set[asyncio.Task]] = {}
     _task_group_states: Dict[str, bool] = {}
-    
+
     def __init__(self, token: str, data_dir: Path):
         """Initialize the bot."""
         try:
@@ -59,8 +59,8 @@ class Bot:
                 raise ValueError("Bot token cannot be empty")
                 
             # Set token and data directory
-            self.token = token
-            self.data_dir = data_dir
+        self.token = token
+        self.data_dir = data_dir
             self._running = False
             self._initialized = False
             
