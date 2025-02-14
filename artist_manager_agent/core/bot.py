@@ -205,24 +205,27 @@ class Bot:
             
             # Add enhanced debug handler
             self.application.add_handler(
-                MessageHandler(filters.COMMAND, self._debug_command),
-                group=-1
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~filters.Regex("^(c|y|n|continue|yes|no|skip)$"),
+                    self._debug_command
+                ),
+                group=10  # Lower priority than all other handlers
             )
             logger.info("Added enhanced debug handler")
             
             # Register handlers in priority order
             handlers_to_register = [
-                (0, self.onboarding.get_handlers(), "Onboarding handlers"),
-                (1, self.core.get_handlers(), "Core handlers"),
-                (2, self.home.get_handlers(), "Home handlers"),
-                (3, self.name_change.get_handlers(), "Name change handlers"),
-                (4, self.goals.get_handlers(), "Goal handlers"),
-                (5, self.tasks.get_handlers(), "Task handlers"),
-                (6, self.projects.get_handlers(), "Project handlers"),
-                (7, self.music.get_handlers(), "Music handlers"),
-                (8, self.team.get_handlers(), "Team handlers"),
-                (9, self.auto.get_handlers(), "Auto mode handlers"),
-                (10, self.blockchain.get_handlers(), "Blockchain handlers")
+                (-1, self.onboarding.get_handlers(), "Onboarding handlers"),
+                (0, self.core.get_handlers(), "Core handlers"),
+                (1, self.home.get_handlers(), "Home handlers"),
+                (2, self.name_change.get_handlers(), "Name change handlers"),
+                (3, self.goals.get_handlers(), "Goal handlers"),
+                (4, self.tasks.get_handlers(), "Task handlers"),
+                (5, self.projects.get_handlers(), "Project handlers"),
+                (6, self.music.get_handlers(), "Music handlers"),
+                (7, self.team.get_handlers(), "Team handlers"),
+                (8, self.auto.get_handlers(), "Auto mode handlers"),
+                (9, self.blockchain.get_handlers(), "Blockchain handlers")
             ]
             
             # Track registered handlers to prevent duplicates

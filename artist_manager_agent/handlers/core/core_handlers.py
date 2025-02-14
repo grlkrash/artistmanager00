@@ -61,51 +61,95 @@ class CoreHandlers(BaseBotHandler):
         await query.answer()
         
         try:
-            # Handle both core_ and menu_ patterns
-            original_data = query.data
-            action = query.data.replace("core_", "").replace("menu_", "")
-            logger.info(f"Core handler processing callback: {original_data} -> {action}")
+            action = query.data.replace("core_", "").replace("settings_", "")
+            logger.info(f"Core handler processing callback: {query.data} -> {action}")
             
-            if action == "menu" or action == "main":
-                logger.info("Showing main menu")
+            if action == "menu":
                 await self.show_menu(update, context)
-            elif action == "goals":
-                logger.info("Routing to goals menu")
-                await self.bot.goal_handlers.show_menu(update, context)
-            elif action == "tasks":
-                logger.info("Routing to tasks menu")
-                await self.bot.task_handlers.show_menu(update, context)
-            elif action == "projects":
-                logger.info("Routing to projects menu")
-                await self.bot.project_handlers.show_menu(update, context)
-            elif action == "music":
-                logger.info("Routing to music menu")
-                await self.bot.music_handlers.show_menu(update, context)
-            elif action == "team":
-                logger.info("Routing to team menu")
-                await self.bot.team_handlers.show_menu(update, context)
-            elif action == "auto":
-                logger.info("Routing to auto mode menu")
-                await self.bot.auto_handlers.show_menu(update, context)
-            elif action == "blockchain":
-                logger.info("Routing to blockchain menu")
-                await self.bot.blockchain_handlers.show_menu(update, context)
-            elif action == "profile" or action == "profile_create":
-                logger.info("Routing to profile")
-                if action == "profile_create":
-                    await self.bot.onboarding.start_onboarding(update, context)
-                else:
-                    await self.show_profile(update, context)
-            elif action == "help":
-                logger.info("Showing help")
-                await self.show_help(update, context)
+            elif action == "manager_name":
+                # Route to name change handler
+                await self.bot.name_change.start_name_change(update, context)
+            elif action == "notifications":
+                keyboard = [
+                    [
+                        InlineKeyboardButton("All", callback_data="core_settings_notif_all"),
+                        InlineKeyboardButton("Important Only", callback_data="core_settings_notif_important")
+                    ],
+                    [
+                        InlineKeyboardButton("Minimal", callback_data="core_settings_notif_minimal"),
+                        InlineKeyboardButton("None", callback_data="core_settings_notif_none")
+                    ],
+                    [InlineKeyboardButton("« Back to Settings", callback_data="core_settings")]
+                ]
+                await self._send_or_edit_message(
+                    update,
+                    "🔔 *Notification Settings*\n\n"
+                    "Choose how often you want to receive notifications:",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+            elif action.startswith("notif_"):
+                notif_level = action.replace("notif_", "")
+                context.user_data["notification_level"] = notif_level
+                await self._send_or_edit_message(
+                    update,
+                    f"✅ Notification level set to: {notif_level.title()}",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("« Back to Settings", callback_data="core_settings")
+                    ]])
+                )
+            elif action == "privacy":
+                keyboard = [
+                    [
+                        InlineKeyboardButton("Public Profile", callback_data="core_settings_privacy_public"),
+                        InlineKeyboardButton("Private Profile", callback_data="core_settings_privacy_private")
+                    ],
+                    [InlineKeyboardButton("« Back to Settings", callback_data="core_settings")]
+                ]
+                await self._send_or_edit_message(
+                    update,
+                    "🔒 *Privacy Settings*\n\n"
+                    "Choose your profile visibility:",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+            elif action == "language":
+                keyboard = [
+                    [
+                        InlineKeyboardButton("English 🇬🇧", callback_data="core_settings_lang_en"),
+                        InlineKeyboardButton("Español 🇪🇸", callback_data="core_settings_lang_es")
+                    ],
+                    [InlineKeyboardButton("« Back to Settings", callback_data="core_settings")]
+                ]
+                await self._send_or_edit_message(
+                    update,
+                    "🌐 *Language Settings*\n\n"
+                    "Choose your preferred language:",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+            elif action == "theme":
+                keyboard = [
+                    [
+                        InlineKeyboardButton("Light ☀️", callback_data="core_settings_theme_light"),
+                        InlineKeyboardButton("Dark 🌙", callback_data="core_settings_theme_dark")
+                    ],
+                    [InlineKeyboardButton("« Back to Settings", callback_data="core_settings")]
+                ]
+                await self._send_or_edit_message(
+                    update,
+                    "🎨 *Theme Settings*\n\n"
+                    "Choose your preferred theme:",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
             else:
                 logger.warning(f"Unknown action in core handler: {action}")
                 await self._send_or_edit_message(
                     update,
                     "Sorry, this feature is not available yet.",
                     reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("« Back to Menu", callback_data="menu_main")
+                        InlineKeyboardButton("« Back to Settings", callback_data="core_settings")
                     ]])
                 )
         except Exception as e:
@@ -114,7 +158,7 @@ class CoreHandlers(BaseBotHandler):
                 update,
                 "Sorry, something went wrong. Please try again.",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("« Back to Menu", callback_data="menu_main")
+                    InlineKeyboardButton("« Back to Settings", callback_data="core_settings")
                 ]])
             )
 
@@ -152,7 +196,6 @@ class CoreHandlers(BaseBotHandler):
         help_text = (
             "🤖 *Artist Manager Bot Help*\n\n"
             "Available commands:\n"
-            "/start - Start the bot or show main menu\n"
             "/help - Show this help message\n"
             "/menu - Show main menu\n"
             "/settings - Show bot settings\n"
@@ -164,7 +207,7 @@ class CoreHandlers(BaseBotHandler):
             "• Music Distribution 🎵\n"
             "• Team Management 👥\n"
             "• Auto Mode ⚙️\n"
-            "• Blockchain Integration 🔗\n\n"
+            "• Blockchain Integration ��\n\n"
             "Need more help? Use the menu buttons below:"
         )
         
@@ -231,14 +274,17 @@ class CoreHandlers(BaseBotHandler):
         """Show settings menu."""
         keyboard = [
             [
-                InlineKeyboardButton("Notifications 🔔", callback_data="core_settings_notifications"),
-                InlineKeyboardButton("Privacy 🔒", callback_data="core_settings_privacy")
+                InlineKeyboardButton("Manager Name 👤", callback_data="core_settings_manager_name"),
+                InlineKeyboardButton("Notifications 🔔", callback_data="core_settings_notifications")
             ],
             [
-                InlineKeyboardButton("Language 🌐", callback_data="core_settings_language"),
+                InlineKeyboardButton("Privacy 🔒", callback_data="core_settings_privacy"),
+                InlineKeyboardButton("Language 🌐", callback_data="core_settings_language")
+            ],
+            [
                 InlineKeyboardButton("Theme 🎨", callback_data="core_settings_theme")
             ],
-            [InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]
+            [InlineKeyboardButton("« Back", callback_data="menu_main")]
         ]
         
         await self._send_or_edit_message(
@@ -253,10 +299,6 @@ class CoreHandlers(BaseBotHandler):
         """Handle text messages."""
         message = update.message.text
         
-        # Ignore /start command
-        if message.startswith('/start'):
-            return
-            
         # Ignore messages if a conversation is active
         if context.user_data.get("conversation_active"):
             return
@@ -295,4 +337,9 @@ class CoreHandlers(BaseBotHandler):
                     ]])
                 )
         except Exception as e:
-            logger.error(f"Error in error handler: {e}") 
+            logger.error(f"Error in error handler: {e}")
+
+    async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /start command."""
+        logger.info("Handling /start command")
+        await self.bot.onboarding.start_onboarding(update, context) 

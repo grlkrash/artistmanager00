@@ -16,8 +16,72 @@ logger = get_logger(__name__)
 # States
 AWAITING_NAME = "AWAITING_NAME"
 AWAITING_GENRE = "AWAITING_GENRE"
+AWAITING_SUBGENRE = "AWAITING_SUBGENRE"
+AWAITING_SIMILAR_ARTISTS = "AWAITING_SIMILAR_ARTISTS"
+AWAITING_SOUND_DESCRIPTION = "AWAITING_SOUND_DESCRIPTION"
+AWAITING_TARGET_AUDIENCE = "AWAITING_TARGET_AUDIENCE"
+AWAITING_FANBASE_SIZE = "AWAITING_FANBASE_SIZE"
 AWAITING_CAREER_STAGE = "AWAITING_CAREER_STAGE"
+AWAITING_SOCIAL_MEDIA = "AWAITING_SOCIAL_MEDIA"
+AWAITING_GOALS = "AWAITING_GOALS"
+AWAITING_GOAL_TIMEFRAME = "AWAITING_GOAL_TIMEFRAME"
 AWAITING_STREAMING_PROFILES = "AWAITING_STREAMING_PROFILES"
+
+# Quick goal templates by career stage
+QUICK_GOALS = {
+    "emerging": [
+        "Release first single",
+        "Build social media presence",
+        "Create EPK",
+        "Book first live show"
+    ],
+    "developing": [
+        "Release EP/Album",
+        "Grow streaming numbers",
+        "Build email list",
+        "Book local tour"
+    ],
+    "established": [
+        "Increase monthly listeners",
+        "Launch merch line",
+        "Book national tour",
+        "Get playlist placements"
+    ],
+    "professional": [
+        "Launch new album campaign",
+        "Book international tour",
+        "Secure brand partnerships",
+        "Expand team"
+    ]
+}
+
+# Career stage specific prompts
+STAGE_PROMPTS = {
+    "emerging": {
+        "sound_description": "How would you describe your sound? (Think about mood, style, influences)",
+        "target_audience": "Who is your ideal listener? (Age, interests, location)",
+        "social_media": "Which social media platform do you use most to connect with fans?",
+        "next_steps": "Let's focus on building your foundation and getting your music out there."
+    },
+    "developing": {
+        "sound_description": "What makes your sound unique? What sets you apart?",
+        "target_audience": "Who are your most engaged listeners currently?",
+        "social_media": "Which platforms are driving the most engagement?",
+        "next_steps": "Let's focus on growing your audience and building momentum."
+    },
+    "established": {
+        "sound_description": "How has your sound evolved? What's your signature style?",
+        "target_audience": "What demographics show the most growth potential?",
+        "social_media": "Which content types perform best across your platforms?",
+        "next_steps": "Let's focus on scaling your success and expanding your reach."
+    },
+    "professional": {
+        "sound_description": "What defines your brand sonically? What's your vision?",
+        "target_audience": "What audience segments drive the most revenue?",
+        "social_media": "What's your content strategy across platforms?",
+        "next_steps": "Let's focus on optimizing your operations and maximizing impact."
+    }
+}
 
 class OnboardingHandlers(BaseBotHandler):
     """Handlers for onboarding process."""
@@ -34,14 +98,17 @@ class OnboardingHandlers(BaseBotHandler):
 
     def get_handlers(self) -> List[BaseHandler]:
         """Get onboarding-related handlers."""
-        return [self.get_conversation_handler()]
+        logger.info("Getting onboarding handlers")
+        handler = self.get_conversation_handler()
+        logger.debug(f"Created conversation handler: {handler}")
+        return [handler]
 
     def get_conversation_handler(self) -> ConversationHandler:
         """Get the conversation handler for onboarding."""
         logger.debug("Creating onboarding conversation handler")
         handler = ConversationHandler(
             entry_points=[
-                CommandHandler("start", self.start_onboarding),
+                CommandHandler("start", self.start_onboarding, block=False),
                 CallbackQueryHandler(self.handle_callback, pattern="^onboard_.*$")
             ],
             states={
@@ -51,8 +118,35 @@ class OnboardingHandlers(BaseBotHandler):
                 AWAITING_GENRE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_genre)
                 ],
+                AWAITING_SUBGENRE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_subgenre)
+                ],
+                AWAITING_SIMILAR_ARTISTS: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_similar_artists)
+                ],
+                AWAITING_SOUND_DESCRIPTION: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_sound_description)
+                ],
+                AWAITING_TARGET_AUDIENCE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_target_audience)
+                ],
+                AWAITING_FANBASE_SIZE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_fanbase_size)
+                ],
                 AWAITING_CAREER_STAGE: [
                     CallbackQueryHandler(self.handle_career_stage, pattern="^stage_")
+                ],
+                AWAITING_SOCIAL_MEDIA: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_social_media),
+                    CallbackQueryHandler(self.handle_social_media_callback, pattern="^social_")
+                ],
+                AWAITING_GOALS: [
+                    CallbackQueryHandler(self.handle_goals, pattern="^goal_"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_custom_goal)
+                ],
+                AWAITING_GOAL_TIMEFRAME: [
+                    CallbackQueryHandler(self.handle_goal_timeframe, pattern="^timeframe_"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_custom_timeframe)
                 ],
                 AWAITING_STREAMING_PROFILES: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_streaming_profiles),
@@ -68,7 +162,8 @@ class OnboardingHandlers(BaseBotHandler):
             per_chat=True,
             per_user=True,
             per_message=False,
-            allow_reentry=True
+            allow_reentry=True,
+            block=False  # Added to ensure non-blocking
         )
         logger.debug(f"Onboarding handler created with entry points: {[type(h).__name__ for h in handler.entry_points]}")
         logger.debug(f"Onboarding handler states: {list(handler.states.keys())}")
@@ -82,6 +177,8 @@ class OnboardingHandlers(BaseBotHandler):
         logger.debug(f"Update content: {update.to_dict()}")
         logger.debug(f"Context user data: {context.user_data}")
         logger.debug(f"Context bot data: {context.bot_data}")
+        logger.debug(f"Message type: {update.message and 'text' if update.message else 'callback'}")
+        logger.debug(f"Command: {update.message and update.message.text if update.message else 'None'}")
         
         try:
             # Clear any existing state
@@ -90,6 +187,8 @@ class OnboardingHandlers(BaseBotHandler):
             
             # Check if user already has a profile
             profile = self.bot.profiles.get(user_id)
+            logger.debug(f"Found profile for user {user_id}: {profile is not None}")
+            
             if profile:
                 logger.info(f"Existing profile found for user {user_id}")
                 # Show dashboard for existing users
@@ -111,6 +210,9 @@ class OnboardingHandlers(BaseBotHandler):
                 await update.callback_query.answer()
                 if update.callback_query.data == "onboard_start":
                     logger.info("Starting artist name input")
+                    # Set conversation active flag
+                    context.user_data["conversation_active"] = True
+                    logger.debug("Set conversation_active flag")
                     await self._send_or_edit_message(
                         update,
                         "What's your artist name?",
@@ -152,7 +254,10 @@ class OnboardingHandlers(BaseBotHandler):
     async def handle_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle artist name input."""
         name = update.message.text.strip()
+        logger.info(f"Handling artist name input: {name}")
         context.user_data["name"] = name
+        context.user_data["conversation_active"] = True  # Ensure flag stays set
+        logger.debug(f"Updated user_data: {context.user_data}")
         
         await self._send_or_edit_message(
             update,
@@ -163,58 +268,253 @@ class OnboardingHandlers(BaseBotHandler):
         return AWAITING_GENRE
 
     async def handle_genre(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-        """Handle genre input."""
+        """Handle genre input and ask for subgenre."""
         genre = update.message.text.strip()
+        logger.info(f"Handling genre input: {genre}")
         context.user_data["genre"] = genre
         
+        await self._send_or_edit_message(
+            update,
+            f"Great! What subgenre of {genre} best describes your music?\n\n"
+            "For example: If genre is 'Hip Hop', subgenre might be 'Trap' or 'Boom Bap'",
+            reply_markup=None
+        )
+        return AWAITING_SUBGENRE
+
+    async def handle_subgenre(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle subgenre input and ask for similar artists."""
+        subgenre = update.message.text.strip()
+        context.user_data["subgenre"] = subgenre
+        
+        await self._send_or_edit_message(
+            update,
+            "Who are 2-3 artists that have a similar sound or style to you?",
+            reply_markup=None
+        )
+        return AWAITING_SIMILAR_ARTISTS
+
+    async def handle_similar_artists(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle similar artists input and move to career stage."""
+        similar_artists = update.message.text.strip()
+        context.user_data["similar_artists"] = similar_artists
+        
         keyboard = [
-            ["Emerging", "Developing"],
-            ["Established", "Professional"]
+            [InlineKeyboardButton("Emerging", callback_data="stage_emerging")],
+            [InlineKeyboardButton("Developing", callback_data="stage_developing")],
+            [InlineKeyboardButton("Established", callback_data="stage_established")],
+            [InlineKeyboardButton("Professional", callback_data="stage_professional")]
         ]
-        reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton(text, callback_data=f"stage_{text}") for text in row] for row in keyboard])
         
         await self._send_or_edit_message(
             update,
             "What's your current career stage?",
-            reply_markup=reply_markup
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return AWAITING_CAREER_STAGE
 
     async def handle_career_stage(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-        """Handle career stage input."""
-        stage = update.callback_query.data.split('_')[1]
+        """Handle career stage input and ask personalized questions."""
+        query = update.callback_query
+        await query.answer()
+        
+        stage = query.data.split('_')[1]
         context.user_data["career_stage"] = stage
         
-        # Create profile
-        profile = ArtistProfile(
-            id=str(uuid.uuid4()),
-            name=context.user_data["name"],
-            genre=context.user_data["genre"],
-            career_stage=stage,
-            goals=[],
-            strengths=[],
-            areas_for_improvement=[],
-            achievements=[],
-            social_media={},
-            streaming_profiles={},
-            brand_guidelines={"description": "", "colors": [], "fonts": [], "tone": "professional"}
-        )
+        # Get stage-specific prompts
+        prompts = STAGE_PROMPTS[stage]
         
-        # Save profile
-        self.bot.profiles[str(profile.id)] = profile
-        
-        # Show success message
-        keyboard = [[InlineKeyboardButton("View Dashboard", callback_data="dashboard_view")]]
+        # Ask for sound description with personalized prompt
         await self._send_or_edit_message(
             update,
-            f"Welcome aboard, {profile.name}! Your profile has been created.",
+            prompts["sound_description"],
+            reply_markup=None
+        )
+        return AWAITING_SOUND_DESCRIPTION
+
+    async def handle_sound_description(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle sound description and ask about target audience."""
+        description = update.message.text.strip()
+        context.user_data["sound_description"] = description
+        
+        stage = context.user_data["career_stage"]
+        prompts = STAGE_PROMPTS[stage]
+        
+        await self._send_or_edit_message(
+            update,
+            prompts["target_audience"],
+            reply_markup=None
+        )
+        return AWAITING_TARGET_AUDIENCE
+
+    async def handle_target_audience(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle target audience and ask about fanbase size."""
+        audience = update.message.text.strip()
+        context.user_data["target_audience"] = audience
+        
+        await self._send_or_edit_message(
+            update,
+            "What's your current fanbase size?\n\n"
+            "For example:\n"
+            "• Monthly Listeners\n"
+            "• Social Media Followers\n"
+            "• Email List Size",
+            reply_markup=None
+        )
+        return AWAITING_FANBASE_SIZE
+
+    async def handle_fanbase_size(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle fanbase size and move to social media."""
+        fanbase = update.message.text.strip()
+        context.user_data["fanbase_size"] = fanbase
+        
+        # Show social media platform options
+        keyboard = [
+            [
+                InlineKeyboardButton("Instagram 📸", callback_data="social_instagram"),
+                InlineKeyboardButton("TikTok 📱", callback_data="social_tiktok")
+            ],
+            [
+                InlineKeyboardButton("Twitter 🐦", callback_data="social_twitter"),
+                InlineKeyboardButton("YouTube 🎥", callback_data="social_youtube")
+            ],
+            [InlineKeyboardButton("Skip", callback_data="social_skip")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            "Let's connect your social media profiles.\nSelect a platform to add:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+        return AWAITING_SOCIAL_MEDIA
+
+    async def handle_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle goal selection."""
+        query = update.callback_query
+        await query.answer()
         
-        # Clear conversation state
-        context.user_data.clear()
+        action = query.data.split('_')[1]
         
-        return ConversationHandler.END 
+        if action == "custom":
+            await self._send_or_edit_message(
+                update,
+                "What's your goal? (Type it in)",
+                reply_markup=None
+            )
+            return AWAITING_GOALS
+        
+        elif action == "quick":
+            goal = query.data.split('_', 2)[2]
+            if "goals" not in context.user_data:
+                context.user_data["goals"] = []
+            context.user_data["goals"].append({"title": goal, "timeframe": None})
+            
+            # Show timeframe options
+            keyboard = [
+                [
+                    InlineKeyboardButton("1 month", callback_data="timeframe_1"),
+                    InlineKeyboardButton("3 months", callback_data="timeframe_3"),
+                    InlineKeyboardButton("6 months", callback_data="timeframe_6")
+                ],
+                [
+                    InlineKeyboardButton("1 year", callback_data="timeframe_12"),
+                    InlineKeyboardButton("Custom", callback_data="timeframe_custom")
+                ]
+            ]
+            
+            await self._send_or_edit_message(
+                update,
+                f"When do you want to achieve: {goal}?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_GOAL_TIMEFRAME
+        
+        elif action == "done":
+            # Move to streaming profiles
+            keyboard = [
+                [
+                    InlineKeyboardButton("🎧 Spotify", callback_data="platform_spotify"),
+                    InlineKeyboardButton("🎵 Apple Music", callback_data="platform_apple")
+                ],
+                [
+                    InlineKeyboardButton("☁️ SoundCloud", callback_data="platform_soundcloud"),
+                    InlineKeyboardButton("Skip", callback_data="platform_skip")
+                ]
+            ]
+            
+            await self._send_or_edit_message(
+                update,
+                "Great! Now let's connect your streaming profiles.\nSelect a platform to add:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_STREAMING_PROFILES
+        
+        return AWAITING_GOALS
+
+    async def handle_custom_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle custom goal input."""
+        goal = update.message.text.strip()
+        if "goals" not in context.user_data:
+            context.user_data["goals"] = []
+        context.user_data["goals"].append({"title": goal, "timeframe": None})
+        
+        # Show timeframe options
+        keyboard = [
+            [
+                InlineKeyboardButton("1 month", callback_data="timeframe_1"),
+                InlineKeyboardButton("3 months", callback_data="timeframe_3"),
+                InlineKeyboardButton("6 months", callback_data="timeframe_6")
+            ],
+            [
+                InlineKeyboardButton("1 year", callback_data="timeframe_12"),
+                InlineKeyboardButton("Custom", callback_data="timeframe_custom")
+            ]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            f"When do you want to achieve: {goal}?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return AWAITING_GOAL_TIMEFRAME
+
+    async def handle_goal_timeframe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle goal timeframe selection."""
+        query = update.callback_query
+        await query.answer()
+        
+        action = query.data.split('_')[1]
+        
+        if action == "custom":
+            await self._send_or_edit_message(
+                update,
+                "Enter the number of months (e.g., '9' for 9 months):",
+                reply_markup=None
+            )
+            return AWAITING_GOAL_TIMEFRAME
+        
+        # Convert to months
+        months = int(action)
+        
+        # Update the last added goal
+        context.user_data["goals"][-1]["timeframe"] = months
+        
+        # Show current goals and options to add more
+        goals_text = "Your goals:\n\n"
+        for goal in context.user_data["goals"]:
+            timeframe = f"{goal['timeframe']} months" if goal['timeframe'] else "No timeframe"
+            goals_text += f"• {goal['title']} ({timeframe})\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("Add Another Goal", callback_data="goal_custom")],
+            [InlineKeyboardButton("Continue", callback_data="goal_done")]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            f"{goals_text}\n\nWould you like to add another goal?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return AWAITING_GOALS
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle onboarding-related callbacks."""
@@ -393,7 +693,7 @@ class OnboardingHandlers(BaseBotHandler):
                 name=context.user_data.get("name", ""),
                 genre=context.user_data.get("genre", ""),
                 career_stage=context.user_data.get("career_stage", ""),
-                goals=[],
+                goals=context.user_data.get("goals", []),
                 strengths=[],
                 areas_for_improvement=[],
                 achievements=[],
@@ -441,32 +741,12 @@ class OnboardingHandlers(BaseBotHandler):
 
     async def cancel_onboarding(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Cancel the onboarding process."""
-        logger.info("Canceling onboarding process")
-        
-        try:
-            # Clear any existing state
-            context.user_data.clear()
-            logger.debug("Cleared user data")
-            
-            # Show cancellation message with menu option
-            keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]]
-            await self._send_or_edit_message(
-                update,
-                "Onboarding cancelled. You can start again anytime with /start",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            logger.debug("Sent cancellation message")
-            
-            return ConversationHandler.END
-            
-        except Exception as e:
-            logger.error(f"Error canceling onboarding: {str(e)}", exc_info=True)
-            await self._send_or_edit_message(
-                update,
-                "Sorry, something went wrong. Please try /start again.",
-                reply_markup=None
-            )
-            return ConversationHandler.END 
+        # Clear conversation state and flag
+        context.user_data.clear()
+        await update.message.reply_text(
+            "Onboarding cancelled. Use /start to begin again."
+        )
+        return ConversationHandler.END
 
     async def handle_streaming_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Handle streaming platform selection callbacks."""
@@ -476,13 +756,13 @@ class OnboardingHandlers(BaseBotHandler):
         action = query.data.replace("platform_", "")
         
         if action == "skip":
-            # Create profile with current data
+            # Create profile with all collected data
             profile = ArtistProfile(
                 id=str(uuid.uuid4()),
-                name=context.user_data.get("name", ""),
-                genre=context.user_data.get("genre", ""),
-                career_stage=context.user_data.get("career_stage", ""),
-                goals=[],
+                name=context.user_data["name"],
+                genre=context.user_data["genre"],
+                career_stage=context.user_data["career_stage"],
+                goals=context.user_data.get("goals", []),
                 strengths=[],
                 areas_for_improvement=[],
                 achievements=[],
@@ -492,13 +772,66 @@ class OnboardingHandlers(BaseBotHandler):
             )
             
             # Save profile
-            self.bot.profiles[str(profile.id)] = profile
+            user_id = str(update.effective_user.id)
+            self.bot.profiles[user_id] = profile
+            logger.info(f"Created and saved profile for user {user_id}")
             
-            # Show success message
-            keyboard = [[InlineKeyboardButton("View Dashboard", callback_data="dashboard_view")]]
+            # Create initial tasks based on goals
+            tasks = []
+            for goal in profile.goals:
+                # Create a task for each goal
+                task = {
+                    "title": f"Plan: {goal['title']}",
+                    "description": f"Create action plan for goal: {goal['title']}",
+                    "priority": "high",
+                    "due_date": None,  # Will be set based on goal timeframe
+                    "status": "pending"
+                }
+                tasks.append(task)
+                
+                # Add goal-specific quick tasks
+                if "single" in goal['title'].lower():
+                    tasks.append({
+                        "title": "Create release timeline",
+                        "description": "Plan key dates for your release",
+                        "priority": "high",
+                        "status": "pending"
+                    })
+                elif "social media" in goal['title'].lower():
+                    tasks.append({
+                        "title": "Set up content calendar",
+                        "description": "Plan your social media content",
+                        "priority": "medium",
+                        "status": "pending"
+                    })
+            
+            # Save tasks
+            context.user_data["initial_tasks"] = tasks
+            
+            # Show welcome dashboard with immediate actions
+            message = (
+                f"🎉 Welcome aboard, {profile.name}!\n\n"
+                "I've created your profile and set up some initial tasks based on your goals.\n\n"
+                "Here's what you can do next:\n"
+                "1. Review your action plan\n"
+                "2. Set up your first tasks\n"
+                "3. Explore the dashboard\n\n"
+                "What would you like to do first?"
+            )
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("📋 View Tasks", callback_data="tasks_view"),
+                    InlineKeyboardButton("🎯 View Goals", callback_data="goals_view")
+                ],
+                [
+                    InlineKeyboardButton("📊 View Dashboard", callback_data="dashboard_view")
+                ]
+            ]
+            
             await self._send_or_edit_message(
                 update,
-                f"Welcome aboard, {profile.name}! Your profile has been created.",
+                message,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             
@@ -540,7 +873,7 @@ class OnboardingHandlers(BaseBotHandler):
                 name=context.user_data.get("name", ""),
                 genre=context.user_data.get("genre", ""),
                 career_stage=context.user_data.get("career_stage", ""),
-                goals=[],
+                goals=context.user_data.get("goals", []),
                 strengths=[],
                 areas_for_improvement=[],
                 achievements=[],
@@ -565,3 +898,147 @@ class OnboardingHandlers(BaseBotHandler):
             return ConversationHandler.END
             
         return AWAITING_STREAMING_PROFILES 
+
+    async def handle_social_media(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle social media profile input."""
+        text = update.message.text.strip()
+        
+        # Initialize social media dict if not exists
+        if "social_media" not in context.user_data:
+            context.user_data["social_media"] = {}
+            
+        # Get current platform being added
+        platform = context.user_data.get("current_platform")
+        if not platform:
+            # Show platform options if no platform selected
+            keyboard = [
+                [
+                    InlineKeyboardButton("Instagram 📸", callback_data="social_instagram"),
+                    InlineKeyboardButton("TikTok 📱", callback_data="social_tiktok")
+                ],
+                [
+                    InlineKeyboardButton("Twitter 🐦", callback_data="social_twitter"),
+                    InlineKeyboardButton("YouTube 🎥", callback_data="social_youtube")
+                ],
+                [InlineKeyboardButton("Skip", callback_data="social_skip")]
+            ]
+            await self._send_or_edit_message(
+                update,
+                "Select a social media platform to add:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_SOCIAL_MEDIA
+            
+        # Store the profile
+        context.user_data["social_media"][platform] = text
+        context.user_data.pop("current_platform")
+        
+        # Ask if they want to add another platform
+        keyboard = [
+            [
+                InlineKeyboardButton("Add Another", callback_data="social_add"),
+                InlineKeyboardButton("Continue", callback_data="social_done")
+            ]
+        ]
+        await self._send_or_edit_message(
+            update,
+            f"✅ Added {platform} profile!\nWould you like to add another platform?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return AWAITING_SOCIAL_MEDIA
+
+    async def handle_social_media_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle social media platform selection callbacks."""
+        query = update.callback_query
+        await query.answer()
+        
+        action = query.data.replace("social_", "")
+        
+        if action == "skip" or action == "done":
+            # Move to goals
+            stage = context.user_data.get("career_stage", "emerging")
+            goals = QUICK_GOALS.get(stage, [])
+            
+            keyboard = []
+            for goal in goals:
+                keyboard.append([InlineKeyboardButton(goal, callback_data=f"goal_quick_{goal}")])
+            keyboard.append([InlineKeyboardButton("Add Custom Goal", callback_data="goal_custom")])
+            
+            await self._send_or_edit_message(
+                update,
+                "Let's set some goals! Here are some suggestions based on your career stage:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_GOALS
+            
+        elif action in ["instagram", "tiktok", "twitter", "youtube"]:
+            context.user_data["current_platform"] = action
+            await self._send_or_edit_message(
+                update,
+                f"Please enter your {action.title()} profile link or username:",
+                reply_markup=None
+            )
+            return AWAITING_SOCIAL_MEDIA
+            
+        elif action == "add":
+            keyboard = [
+                [
+                    InlineKeyboardButton("Instagram 📸", callback_data="social_instagram"),
+                    InlineKeyboardButton("TikTok 📱", callback_data="social_tiktok")
+                ],
+                [
+                    InlineKeyboardButton("Twitter 🐦", callback_data="social_twitter"),
+                    InlineKeyboardButton("YouTube 🎥", callback_data="social_youtube")
+                ],
+                [InlineKeyboardButton("Skip", callback_data="social_skip")]
+            ]
+            await self._send_or_edit_message(
+                update,
+                "Select a social media platform to add:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_SOCIAL_MEDIA
+            
+        return AWAITING_SOCIAL_MEDIA 
+
+    async def handle_custom_timeframe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Handle custom timeframe input for goals."""
+        try:
+            # Parse the number of months
+            months = int(update.message.text.strip())
+            if months <= 0:
+                await self._send_or_edit_message(
+                    update,
+                    "Please enter a positive number of months:",
+                    reply_markup=None
+                )
+                return AWAITING_GOAL_TIMEFRAME
+            
+            # Update the last added goal
+            context.user_data["goals"][-1]["timeframe"] = months
+            
+            # Show current goals and options to add more
+            goals_text = "Your goals:\n\n"
+            for goal in context.user_data["goals"]:
+                timeframe = f"{goal['timeframe']} months" if goal['timeframe'] else "No timeframe"
+                goals_text += f"• {goal['title']} ({timeframe})\n"
+            
+            keyboard = [
+                [InlineKeyboardButton("Add Another Goal", callback_data="goal_custom")],
+                [InlineKeyboardButton("Continue", callback_data="goal_done")]
+            ]
+            
+            await self._send_or_edit_message(
+                update,
+                f"{goals_text}\n\nWould you like to add another goal?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return AWAITING_GOALS
+            
+        except ValueError:
+            await self._send_or_edit_message(
+                update,
+                "Please enter a valid number of months (e.g., '9' for 9 months):",
+                reply_markup=None
+            )
+            return AWAITING_GOAL_TIMEFRAME 
