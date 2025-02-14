@@ -291,6 +291,14 @@ class RobustPersistence(BasePersistence):
                 with open(self.filepath, "rb") as f:
                     data = pickle.load(f)
                     
+                # Load storage flags
+                store_flags = data.get("store_flags", {})
+                self._store_user_data = store_flags.get("_store_user_data", True)
+                self._store_chat_data = store_flags.get("_store_chat_data", True)
+                self._store_bot_data = store_flags.get("_store_bot_data", True)
+                self._store_callback_data = store_flags.get("_store_callback_data", True)
+                
+                # Load data
                 if self.store_user_data:
                     self._user_data = data.get("user_data", {})
                 if self.store_chat_data:
@@ -304,7 +312,7 @@ class RobustPersistence(BasePersistence):
                 return
                 
         except Exception as e:
-            logger.error(f"Error loading persistence data: {str(e)}")
+            logger.error(f"Error loading persistence data: {str(e)}", exc_info=True)
             
         # Try loading from backup
         try:
@@ -314,6 +322,14 @@ class RobustPersistence(BasePersistence):
                     with open(backup, "rb") as f:
                         data = pickle.load(f)
                         
+                    # Load storage flags
+                    store_flags = data.get("store_flags", {})
+                    self._store_user_data = store_flags.get("_store_user_data", True)
+                    self._store_chat_data = store_flags.get("_store_chat_data", True)
+                    self._store_bot_data = store_flags.get("_store_bot_data", True)
+                    self._store_callback_data = store_flags.get("_store_callback_data", True)
+                    
+                    # Load data
                     if self.store_user_data:
                         self._user_data = data.get("user_data", {})
                     if self.store_chat_data:

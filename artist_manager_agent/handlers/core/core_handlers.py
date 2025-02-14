@@ -19,7 +19,6 @@ class CoreHandlers(BaseBotHandler):
         """Get core command handlers."""
         logger.info("Registering core handlers")
         handlers = [
-            CommandHandler("start", self.start, block=False),
             CommandHandler("help", self.show_help, block=False),
             CommandHandler("settings", self.show_settings, block=False),
             CommandHandler("menu", self.show_menu, block=False),
@@ -30,36 +29,6 @@ class CoreHandlers(BaseBotHandler):
         logger.debug(f"Core handlers: {[type(h).__name__ for h in handlers]}")
         logger.info(f"Registered {len(handlers)} core handlers")
         return handlers
-
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /start command."""
-        logger.debug("Start command received")
-        try:
-            user = update.effective_user
-            user_id = str(user.id)
-            logger.info(f"Start command from user {user_id}")
-            
-            # Check if user has a profile
-            logger.debug("Checking for user profile")
-            profile = self.bot.profiles.get(user_id)
-            logger.debug(f"Profile found: {profile is not None}")
-            
-            if profile:
-                # Returning user - show dashboard
-                logger.info(f"Existing profile found for user {user_id}, showing dashboard")
-                await self.show_menu(update, context)
-            else:
-                # New user - start onboarding
-                logger.info(f"No profile found for user {user_id}, starting onboarding")
-                logger.debug("Calling onboarding.start_onboarding")
-                await self.bot.onboarding.start_onboarding(update, context)
-                logger.debug("Onboarding started")
-                
-            logger.debug("Start command processed successfully")
-            
-        except Exception as e:
-            logger.error(f"Error in start command: {str(e)}", exc_info=True)
-            await self.handle_error(update, context)
 
     async def health_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /health command."""
@@ -283,6 +252,15 @@ class CoreHandlers(BaseBotHandler):
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle text messages."""
         message = update.message.text
+        
+        # Ignore /start command
+        if message.startswith('/start'):
+            return
+            
+        # Ignore messages if a conversation is active
+        if context.user_data.get("conversation_active"):
+            return
+            
         user_id = str(update.effective_user.id)
         profile = self.bot.profiles.get(user_id)
         
