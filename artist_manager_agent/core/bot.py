@@ -21,7 +21,6 @@ from telegram.ext import (
     BaseHandler
 )
 
-# Fix imports to use parent package
 from ..handlers.core.core_handlers import CoreHandlers
 from ..handlers.features.goal_handlers import GoalHandlers
 from ..handlers.features.task_handlers import TaskHandlers
@@ -59,8 +58,8 @@ class Bot:
                 raise ValueError("Bot token cannot be empty")
                 
             # Set token and data directory
-        self.token = token
-        self.data_dir = data_dir
+            self.token = token
+            self.data_dir = data_dir
             self._running = False
             self._initialized = False
             
@@ -215,17 +214,17 @@ class Bot:
             
             # Register handlers in priority order
             handlers_to_register = [
-                (-1, self.onboarding.get_handlers(), "Onboarding handlers"),
-                (0, self.core.get_handlers(), "Core handlers"),
-                (1, self.home.get_handlers(), "Home handlers"),
-                (2, self.name_change.get_handlers(), "Name change handlers"),
-                (3, self.goals.get_handlers(), "Goal handlers"),
-                (4, self.tasks.get_handlers(), "Task handlers"),
-                (5, self.projects.get_handlers(), "Project handlers"),
-                (6, self.music.get_handlers(), "Music handlers"),
-                (7, self.team.get_handlers(), "Team handlers"),
-                (8, self.auto.get_handlers(), "Auto mode handlers"),
-                (9, self.blockchain.get_handlers(), "Blockchain handlers")
+                (0, self.onboarding.get_handlers(), "Onboarding handlers"),
+                (1, self.core.get_handlers(), "Core handlers"),
+                (2, self.home.get_handlers(), "Home handlers"),
+                (3, self.name_change.get_handlers(), "Name change handlers"),
+                (4, self.goals.get_handlers(), "Goal handlers"),
+                (5, self.tasks.get_handlers(), "Task handlers"),
+                (6, self.projects.get_handlers(), "Project handlers"),
+                (7, self.music.get_handlers(), "Music handlers"),
+                (8, self.team.get_handlers(), "Team handlers"),
+                (9, self.auto.get_handlers(), "Auto mode handlers"),
+                (10, self.blockchain.get_handlers(), "Blockchain handlers")
             ]
             
             # Track registered handlers to prevent duplicates
@@ -300,9 +299,6 @@ class Bot:
             await self.application.initialize()
             await self.application.start()
             
-            # Set running flag before creating tasks
-            self._running = True
-            
             # Initialize task groups
             logger.info("Initializing task groups...")
             self._task_group_states["maintenance"] = True
@@ -322,6 +318,7 @@ class Bot:
             logger.info("Starting polling...")
             await self.application.updater.start_polling(drop_pending_updates=True)
             
+            self._running = True
             logger.info("Bot started successfully")
             
         except Exception as e:
@@ -385,8 +382,7 @@ class Bot:
         if not self._running:
             logger.warning("Attempting to create task while bot is not running")
             if not self._task_group_states.get(group, False):
-                logger.error(f"Task group {group} is stopped")
-                return None
+                raise RuntimeError(f"Task group {group} is stopped")
             
         task_group = self._task_groups.setdefault(group, set())
         

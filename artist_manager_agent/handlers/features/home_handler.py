@@ -25,7 +25,7 @@ class HomeHandlers(BaseBotHandler):
         """Get home menu handlers."""
         return [
             CommandHandler("home", self.show_menu),
-            CallbackQueryHandler(self.handle_callback, pattern="^(home_menu|home_.*|menu_.*)$")
+            CallbackQueryHandler(self.handle_callback, pattern="^(home_menu|home_.*|menu_.*|dashboard_view)$")
         ]
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -41,7 +41,7 @@ class HomeHandlers(BaseBotHandler):
             if action == "menu" or action == "":
                 await self.show_menu(update, context)
             elif action == "dashboard" or query.data == "dashboard_view":
-                await show_dashboard(update, context)
+                await self.show_dashboard(update, context)
             elif action == "goals":
                 await self.bot.goal_handlers.show_menu(update, context)
             elif action == "tasks":
@@ -133,6 +133,61 @@ class HomeHandlers(BaseBotHandler):
             parse_mode="Markdown"
         )
 
+    async def show_dashboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the main dashboard for returning users."""
+        logger.info("Showing dashboard for returning user")
+        
+        # Get user profile
+        user_id = str(update.effective_user.id)
+        profile = self.bot.profiles.get(user_id)
+        
+        if not profile:
+            # No profile found, redirect to start
+            message = (
+                "I don't see an existing profile for you. Let's create one!\n\n"
+                "Use /start to begin the setup process."
+            )
+            await self._send_or_edit_message(update, message)
+            return
+            
+        # Format profile info for display
+        name = context.bot_data.get('manager_name', 'Kennedy Young')
+        
+        # Create dashboard message
+        dashboard_text = (
+            f"👋 Welcome back! I'm {name}, your artist manager.\n\n"
+            f"Artist: {profile.name}\n"
+            f"Genre: {profile.genre}\n"
+            f"Career Stage: {profile.career_stage}\n\n"
+            "What would you like to work on today?"
+        )
+        
+        # Create keyboard with main actions
+        keyboard = [
+            [
+                InlineKeyboardButton("Goals 🎯", callback_data="goal_view"),
+                InlineKeyboardButton("Tasks 📝", callback_data="task_view")
+            ],
+            [
+                InlineKeyboardButton("Projects 🚀", callback_data="project_view"),
+                InlineKeyboardButton("Music 🎵", callback_data="music_view")
+            ],
+            [
+                InlineKeyboardButton("Team 👥", callback_data="team_view"),
+                InlineKeyboardButton("Auto Mode ⚙️", callback_data="auto_view")
+            ],
+            [
+                InlineKeyboardButton("Blockchain 🔗", callback_data="blockchain_view"),
+                InlineKeyboardButton("Profile 👤", callback_data="profile_view")
+            ]
+        ]
+        
+        await self._send_or_edit_message(
+            update,
+            dashboard_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
 async def show_feature_unavailable(query, feature_name: str) -> None:
     """Show a consistent message for unavailable features."""
     await query.message.edit_text(
@@ -141,77 +196,4 @@ async def show_feature_unavailable(query, feature_name: str) -> None:
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("« Back to Dashboard", callback_data="back_to_dashboard")
         ]])
-    )
-
-async def show_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show the main dashboard for returning users."""
-    logger.info("Showing dashboard for returning user")
-    
-    # Get user profile
-    user_id = str(update.effective_user.id)
-    profile = context.bot_data.get('profiles', {}).get(user_id)
-    
-    if not profile:
-        # No profile found, redirect to start
-        message = (
-            "I don't see an existing profile for you. Let's create one!\n\n"
-            "Use /start to begin the setup process."
-        )
-        if update.callback_query:
-            await update.callback_query.message.edit_text(message)
-        else:
-            await update.message.reply_text(message)
-        return
-        
-    # Format profile info for display
-    name = context.bot_data.get('manager_name', 'Frankie Rhodes')
-    
-    # Create dashboard message
-    dashboard_text = (
-        f"👋 Welcome back! I'm {name}, your artist manager.\n\n"
-        f"Artist: {profile.name}\n"
-        f"Genre: {profile.genre}\n"
-        f"Career Stage: {profile.career_stage}\n\n"
-        "What would you like to work on today?"
-    )
-    
-    # Create keyboard with main actions
-    keyboard = [
-        [
-            InlineKeyboardButton("Goals 🎯", callback_data="goal_view"),
-            InlineKeyboardButton("Tasks 📝", callback_data="task_view")
-        ],
-        [
-            InlineKeyboardButton("Projects 🚀", callback_data="project_view"),
-            InlineKeyboardButton("Music 🎵", callback_data="music_view")
-        ],
-        [
-            InlineKeyboardButton("Team 👥", callback_data="team_view"),
-            InlineKeyboardButton("Auto Mode ⚙️", callback_data="auto_view")
-        ],
-        [
-            InlineKeyboardButton("Blockchain 🔗", callback_data="blockchain_view"),
-            InlineKeyboardButton("Profile 👤", callback_data="profile_view")
-        ]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    try:
-        if update.callback_query:
-            await update.callback_query.message.edit_text(
-                dashboard_text,
-                reply_markup=reply_markup
-            )
-        else:
-            await update.message.reply_text(
-                dashboard_text,
-                reply_markup=reply_markup
-            )
-    except Exception as e:
-        logger.error(f"Error showing dashboard: {str(e)}")
-        error_message = "Sorry, there was an error loading the dashboard. Please try again."
-        if update.callback_query:
-            await update.callback_query.message.edit_text(error_message)
-        else:
-            await update.message.reply_text(error_message) 
+    ) 
