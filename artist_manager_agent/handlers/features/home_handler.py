@@ -40,6 +40,8 @@ class HomeHandlers(BaseBotHandler):
             
             if action == "menu" or action == "":
                 await self.show_menu(update, context)
+            elif action == "dashboard" or query.data == "dashboard_view":
+                await show_dashboard(update, context)
             elif action == "goals":
                 await self.bot.goal_handlers.show_menu(update, context)
             elif action == "tasks":
