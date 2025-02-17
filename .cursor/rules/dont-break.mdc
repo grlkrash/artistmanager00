@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+---
+
+# Don't break existing code/ core code of the program ai agent artist manager "artistmanager00" . Exceptions can be made, but please ask first if you are restructing the code, deleting large chunks of code or revising large chunks of code and any other chanes that could break the code. Please ask/ propose them first. In these scarniors, I want you to write two detailed paragraphs about each proposed solution and don't commit to either solution until youve fully considered both. Then explain to me which one is obviously superior. 
+
+- You can @ files here
+- You can use markdown but dont have to
